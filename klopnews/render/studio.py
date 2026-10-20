@@ -66,6 +66,19 @@ def ellipsize(text: str, f, width: int) -> str:
     return wrap(text, f, width, 1)[0]
 
 
+def fit_text(text: str, sizes: tuple[int, ...], width: int, max_lines: int, weight: str = "Bold"):
+    """Самый крупный шрифт, при котором текст целиком влезает в max_lines строк. → (шрифт, строки).
+
+    Многоточие — только если не влезло даже на самом мелком.
+    """
+    for size in sizes:
+        f = font(size, weight)
+        lines = wrap(text, f, width, 99)
+        if len(lines) <= max_lines:
+            return f, lines
+    return f, wrap(text, f, width, max_lines)
+
+
 def pill(d: ImageDraw.ImageDraw, x: int, y: int, text: str, bg, size: int = 18, fg=INK) -> int:
     f = font(size)
     w = int(f.getlength(text)) + 24
@@ -164,7 +177,8 @@ def _chrome(img: Image.Image, sc: Scene, live: str):
     if lower:
         d.rectangle([24, 606, W - 24, 652], fill=(250, 250, 252))
         x = pill(d, 24, 606, sc.tag or "НОВОСТИ", hex_rgb(sc.color), 20) if sc.tag else 24
-        d.text((x + 16, 616), ellipsize(lower, font(22, "SemiBold"), W - 60 - x), font=font(22, "SemiBold"), fill=(15, 20, 35))
+        f, lines = fit_text(lower, (22, 20, 18, 16), W - 60 - x, 1, "SemiBold")
+        d.text((x + 16, 629 - f.size // 2 - 2), lines[0], font=f, fill=(15, 20, 35))
     d.rectangle([0, 672, W, H], fill=(8, 14, 34))
     _ticker_label(d)
     if not sc.ticker:
@@ -215,8 +229,9 @@ def _card(img: Image.Image, sc: Scene) -> tuple[int, int, int]:
     if sc.tag:
         pill(d, x0 + 30, y, sc.tag, color, 18)
         y += 52
-    f = font(40) if not sc.subtitle else font(48)
-    for line in wrap(sc.title, f, x1 - x0 - 60 - (90 if sc.number else 0), 3):
+    f, lines = fit_text(sc.title, (48, 42, 36) if sc.subtitle else (40, 36, 32, 28),
+                        x1 - x0 - 60 - (90 if sc.number else 0), 3)
+    for line in lines:
         d.text((x0 + 30, y), line, font=f, fill=INK)
         y += f.size + 10
     if sc.subtitle:
@@ -257,13 +272,16 @@ def _quotes(d, quotes, x, y, w):
 
 
 def fit_bullets(bullets: list[str], area: tuple[int, int, int], bottom: int) -> tuple[ImageFont.FreeTypeFont, list[list[str]]]:
-    """Самый крупный шрифт, при котором пункты целиком помещаются до bottom; не влезло и на мелком — режем хвост."""
+    """Самый крупный шрифт, при котором все пункты целиком помещаются до bottom.
+
+    Пункт никогда не обрезается посередине: не влезло и на мелком шрифте — последние пункты не показываем.
+    """
     x, y0, w = area
-    for size in (24, 22, 20):
+    for size in (24, 22, 20, 18):
         f = font(size, "Medium")
         out, y = [], y0
         for b in bullets:
-            lines = wrap(b, f, w - 28, 3)
+            lines = wrap(b, f, w - 28, 99)
             y += len(lines) * (size + 8) + 12
             if y > bottom:
                 break
