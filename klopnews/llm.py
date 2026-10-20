@@ -41,6 +41,11 @@ class AnthropicLLM:
 
 class FakeLLM:
     def complete(self, system: str, user: str) -> str:
+        if '"afisha"' in system:
+            return json.dumps({"script": "На этой неделе в Праге есть куда сходить: митап про ИИ и лекция. Одобряю!"},
+                              ensure_ascii=False)
+        if '"found"' in system:
+            return json.dumps({"found": []})
         if '"events"' in system:
             n = len(re.findall(r"^\[\d+\]", user, re.M))
             return json.dumps({"events": [{"items": [i], "importance": 8 - i, "reporter_ok": i == 0}

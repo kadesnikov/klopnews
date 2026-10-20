@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from klopnews import editor
+from klopnews import editor, events
 from klopnews.config import Settings, catalog
 from klopnews.db import Edition, Episode, Story, User
 from klopnews.llm import make_llm
@@ -43,6 +43,8 @@ def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
                          quotes=st.data.get("quotes", []), ticker=ticker)
     if st.kind == "brief":
         scene.lower = f"Коротко: {st.headline}"
+    elif st.kind == "events":
+        scene.lower = "Ссылки на все события — под видео"
     out = base / f"{st.id}.mp4"
     if not st.reporter_script:
         st.duration = studio.render_segment(scene, _anchor_wav(st.script, s), out)
@@ -90,6 +92,8 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
             db.add(st)
             db.commit()  # сразу: перезапуск воркера не потеряет написанное
             log.info("сюжет написан: [%s] %s", st.topic, st.headline)
+        if "ai" in cat["topics"] and cat["events"] and not any(st.kind == "events" for st in have):
+            afisha(db, s, cat, edition, now)
     todo = db.scalars(select(Story).where(Story.edition == edition, Story.status != "ready")
                       .order_by(Story.importance.desc())).all()
     tick = ticker_text(db.scalars(select(Story).where(Story.edition == edition)).all())
@@ -105,6 +109,25 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
     ed.status = "ready"
     db.commit()
     log.info("выпуск дня %s готов", edition)
+
+
+def afisha(db, s: Settings, cat: dict, edition: str, now: datetime) -> None:
+    """Блок «ИИ в Праге»: сбор ивентов и сюжет по ним. Не получилось — выпуск выходит без него."""
+    llm = make_llm(s)
+    try:
+        events.collect(db, s, llm, cat["events"], now)
+        evs = events.to_announce(db, now, cat["events"])
+        st = editor.write_events(llm, evs, cat["events"], edition)
+    except Exception as e:
+        db.rollback()
+        log.error("afisha_failed: %r", e)
+        return
+    if st:
+        for e in evs:
+            e.announced = True
+        db.add(st)
+        db.commit()
+        log.info("афиша: %d событий в выпуске", len(evs))
 
 
 def prefetch_audio(stories: list[Story], s: Settings, workers: int = 4) -> None:
@@ -139,12 +162,12 @@ def _key_words(headline: str) -> set[str]:
 def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]:
     """Сюжеты под настройки человека, по важности, пока влезают в его длительность.
 
-    Порядок в выпуске: главные сюжеты, рынки, потом «коротко».
+    Порядок в выпуске: главные сюжеты, рынки, «ИИ в Праге», потом «коротко».
     """
     muted = set(user.muted_sources or [])
     ok = [st for st in stories if st.status == "ready"
           and (not user.topics or st.topic in user.topics)
-          and (st.kind == "markets" or any(src["id"] not in muted for src in st.sources))]
+          and (st.kind in ("markets", "events") or any(src["id"] not in muted for src in st.sources))]
     chosen, used, seen = [], 0.0, []
     for st in sorted(ok, key=lambda x: -x.importance):
         keys = _key_words(st.headline)
@@ -154,7 +177,7 @@ def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]
             chosen.append(st)
             seen.append(keys)
             used += st.duration
-    rank = {"story": 0, "markets": 1, "brief": 2}
+    rank = {"story": 0, "markets": 1, "events": 2, "brief": 3}
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))
 
 

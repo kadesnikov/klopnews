@@ -39,7 +39,7 @@ def login_url(s: Settings, user: User, next_path: str = "/") -> str:
 def notify_episode(s: Settings, user: User, ep, n_stories: int) -> None:
     minutes = max(1, round(ep.duration / 60))
     send(s, user.tg_id, f"🐞 <b>Клоп·Новости готовы</b>\n{n_stories} сюжетов, {minutes} мин.",
-         ("▶️ Смотреть выпуск", f"{s.public_url}/e/{ep.slug}"))
+         ("▶️ Смотреть выпуск", f"{s.public_url}/e/{ep.slug}?src=tg"))
 
 
 def handle(s: Settings, msg: dict, make_now) -> None:
@@ -58,6 +58,9 @@ def handle(s: Settings, msg: dict, make_now) -> None:
         if text.startswith("/now"):
             send(s, chat, "Собираю выпуск под твои настройки, это пара минут… 🐞")
             threading.Thread(target=make_now, args=(user.id,), daemon=True).start()
+        elif text.startswith("/admin") and user.tg_id in s.admin_ids:
+            send(s, chat, "Кто подключён, кто смотрит и сколько досматривает:",
+                 ("📊 Открыть админку", login_url(s, user, "/admin")))
         elif text.startswith("/settings"):
             send(s, chat, "Темы, источники и длительность выпуска:", ("⚙️ Настройки", login_url(s, user, "/settings")))
         else:
