@@ -1,4 +1,5 @@
 """Настройки из .env. Темы и источники — в config/sources.yaml (их правят чаще кода)."""
+import logging
 from functools import lru_cache
 from pathlib import Path
 
@@ -64,6 +65,13 @@ class Settings(BaseSettings):
     @property
     def db_url(self) -> str:
         return f"sqlite:///{self.data_dir / 'klopnews.db'}"
+
+
+def setup_logging() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # httpx пишет каждый запрос с полным URL, а в URL Telegram API — токен бота
+    for name in ("httpx", "httpx2", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 @lru_cache

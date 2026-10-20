@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from klopnews import bot, feeds, producer
-from klopnews.config import Settings, catalog, settings
+from klopnews.config import Settings, catalog, settings, setup_logging
 from klopnews.db import Edition, Episode, User, session
 
 log = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def tick(s: Settings, last_fetch: float) -> float:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    setup_logging()
     s = settings()
     if s.telegram_bot_token:
         threading.Thread(target=bot.poll_forever, args=(s, make_now), daemon=True).start()

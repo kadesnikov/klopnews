@@ -119,8 +119,11 @@ def write_markets(llm, quotes: list[dict], items: list[Item], edition: str) -> S
 
 
 def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enabled: bool = True,
-                  reporters: int = 2, per_topic: int = 8) -> list[Story]:
-    """Тексты всех сюжетов дня (без озвучки). Ошибка в одном сюжете не валит выпуск."""
+                  reporters: int = 2, per_topic: int = 8, done_urls: frozenset = frozenset(), markets_done: bool = False):
+    """Тексты сюжетов дня (без озвучки), по одному — чтобы сохранять сразу.
+
+    Ошибка в одном сюжете не валит выпуск. done_urls — события, уже написанные до перезапуска.
+    """
     sources, since = cat["sources"], now - timedelta(hours=30)
     yday = (datetime.fromisoformat(edition) - timedelta(days=1)).date().isoformat()
     picked: list[tuple[str, dict]] = []
@@ -135,26 +138,25 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
         except Exception as e:
             log.error("select_failed %s: %r", topic, e)
 
-    # Прямые включения — самым важным событиям с местом и картинкой (картинка известна только из RSS до записи)
+    # Прямые включения — самым важным событиям, у которых есть место
     report_ids = set()
     if reporter_enabled:
         cands = sorted((p for p in picked if p[1]["reporter_ok"]), key=lambda p: -p[1]["importance"])
         report_ids = {id(p[1]) for p in cands[:reporters]}
 
-    stories = []
     for topic, ev in picked:
+        if any(it.url in done_urls for it in ev["items"]):
+            continue
         try:
-            stories.append(write_story(llm, ev, topic, sources, edition, id(ev) in report_ids))
+            yield write_story(llm, ev, topic, sources, edition, id(ev) in report_ids)
         except Exception as e:
             log.error("write_failed %s: %r", ev["items"][0].title, e)
 
-    if "finance" in cat["topics"] and cat["markets"]:
+    if "finance" in cat["topics"] and cat["markets"] and not markets_done:
         try:
             st = write_markets(llm, markets.fetch_quotes(cat["markets"]), recent_items(db, sources, "finance", since), edition)
             if st:
-                stories.append(st)
+                yield st
         except Exception as e:
             log.error("markets_failed: %r", e)
-    log.info("edition %s: %d stories", edition, len(stories))
-    return stories
 

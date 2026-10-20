@@ -57,16 +57,21 @@ def render_story(st: Story, s: Settings, cat: dict) -> None:
 
 
 def build_edition(db, s: Settings, edition: str, now: datetime) -> None:
-    """Тексты, озвучка и клипы всех сюжетов дня. Повторный вызов достраивает упавшие."""
+    """Тексты, озвучка и клипы всех сюжетов дня.
+
+    Повторный вызов (после перезапуска воркера) не переписывает готовое: дописывает новые события и рендерит недостающее.
+    """
     ed = db.get(Edition, edition) or Edition(date=edition)
     ed.status = "building"
     db.add(ed)
     db.commit()
     cat = catalog()
-    if not db.scalar(select(Story.id).where(Story.edition == edition)):
-        for st in editor.build_stories(db, make_llm(s), cat, edition, now, s.reporter_enabled, s.reporters_per_edition):
-            db.add(st)
-        db.commit()
+    have = db.scalars(select(Story).where(Story.edition == edition)).all()
+    done = frozenset(src["url"] for st in have for src in st.sources)
+    for st in editor.build_stories(db, make_llm(s), cat, edition, now, s.reporter_enabled, s.reporters_per_edition,
+                                   done_urls=done, markets_done=any(st.kind == "markets" for st in have)):
+        db.add(st)
+        db.commit()  # сразу: перезапуск воркера не потеряет написанное
     todo = db.scalars(select(Story).where(Story.edition == edition, Story.status != "ready")
                       .order_by(Story.importance.desc())).all()
     for st in todo:

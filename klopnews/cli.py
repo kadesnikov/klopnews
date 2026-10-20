@@ -3,14 +3,13 @@
 demo — без сети и ключей: подкладывает тестовые новости, чтобы прогнать весь конвейер
 (вместе с LLM_PROVIDER=fake и TTS_PROVIDER=dummy).
 """
-import logging
 import sys
 from datetime import timedelta
 
 from sqlalchemy import select
 
 from klopnews import feeds, producer
-from klopnews.config import catalog, settings
+from klopnews.config import catalog, settings, setup_logging
 from klopnews.db import Item, User, session, utcnow
 from klopnews.worker import edition_date, local_now
 
@@ -25,7 +24,7 @@ DEMO = [
 
 
 def main(argv: list[str]) -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    setup_logging()
     s, cmd = settings(), argv[0] if argv else ""
     with session() as db:
         if cmd == "fetch":

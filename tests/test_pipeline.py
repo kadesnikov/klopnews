@@ -50,3 +50,19 @@ def test_full_pipeline(monkeypatch):
         u = db.get(User, user.id)
         assert (u.name, u.minutes, u.delivery_time, u.topics) == ("Мария", 15, "08:15", ["ai", "finance"])
         assert "verge" not in u.muted_sources and "irozhlas" in u.muted_sources
+
+
+def test_rebuild_resumes_without_duplicates(monkeypatch):
+    monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
+    monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [])
+    monkeypatch.setattr("klopnews.render.studio.render_segment", lambda *a, **k: 1.0)
+    s = settings()
+    with session() as db:
+        for i in range(3):
+            db.add(Item(source_id="verge", url=f"https://ex.com/{i}", title=f"Новость {i}", summary="",
+                        published_at=utcnow() - timedelta(hours=1)))
+        db.commit()
+        producer.build_edition(db, s, "2026-10-20", utcnow())
+        first = db.query(Story).count()
+        producer.build_edition(db, s, "2026-10-20", utcnow())  # как после перезапуска воркера
+        assert db.query(Story).count() == first == 3
