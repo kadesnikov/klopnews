@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     reporter_enabled: bool = True
     reporters_per_edition: int = 2
 
+    brave_api_key: str = ""  # поиск ИИ-ивентов в Праге (как в piano-piano); пусто — только страницы-афиши
+
     telegram_bot_token: str = ""
     telegram_bot_username: str = ""
     allowed_telegram_ids: str = ""  # через запятую; пусто — пускать всех
@@ -89,10 +91,11 @@ def settings() -> Settings:
 
 @lru_cache
 def catalog(path: Path | None = None) -> dict:
-    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...]}"""
+    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...], 'events': {city, pages, searches}}"""
     raw = yaml.safe_load((path or settings().sources_file).read_text(encoding="utf-8"))
     return {
         "topics": raw["topics"],
         "sources": {s["id"]: s for s in raw["sources"]},
         "markets": raw.get("markets", []),
+        "events": raw.get("events") or {},
     }
