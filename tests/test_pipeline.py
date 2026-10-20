@@ -17,7 +17,7 @@ def test_full_pipeline(monkeypatch):
     s = settings()
     with session() as db:
         for i, (src, title) in enumerate([("verge", "OpenAI выпустила модель"), ("irozhlas", "В Праге новое метро"),
-                                          ("cnbc", "Золото дешевеет")]):
+                                          ("marketwatch", "Золото дешевеет")]):
             db.add(Item(source_id=src, url=f"https://ex.com/{i}", title=title, summary=title,
                         published_at=utcnow() - timedelta(hours=1)))
         user = User(tg_id=7, name="Маша", topics=[], muted_sources=[], minutes=5, delivery_time="07:30")
@@ -44,7 +44,7 @@ def test_full_pipeline(monkeypatch):
     assert client.get("/settings", follow_redirects=False).status_code == 303
     client.get(f"/login?t={sign(user.id, 60, s.session_secret)}&next=/settings")
     r = client.post("/settings", data={"name": "Мария", "minutes": "15", "delivery_time": "08:15",
-                                       "topics": ["ai", "finance"], "sources": ["verge", "cnbc"]})
+                                       "topics": ["ai", "finance"], "sources": ["verge", "marketwatch"]})
     assert r.status_code == 200
     with session() as db:
         u = db.get(User, user.id)
