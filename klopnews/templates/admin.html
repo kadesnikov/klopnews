@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Клоп·Новости — админка{% endblock %}
+{% block main %}
+{% set t = s.tiles %}
+<h1>Админка</h1>
+<p class="muted">За {{ s.days }} дн. ·
+  {% for d in [7, 14, 30] %}<a href="?days={{ d }}"{% if d == s.days %} class="on"{% endif %}>{{ d }} дн.</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+
+<div class="tiles">
+  <div class="card tile"><span class="muted">Подключено</span><b>{{ t.users }}</b><span class="muted small">написали боту /start</span></div>
+  <div class="card tile"><span class="muted">Открывают выпуск</span><b>{{ t.opened|pct }}</b><span class="muted small">из {{ t.delivered }} отправленных</span></div>
+  <div class="card tile"><span class="muted">Досматривают в среднем</span><b>{{ t.share|pct }}</b><span class="muted small">до конца — {{ t.done }} раз</span></div>
+  <div class="card tile"><span class="muted">Смотрели всего</span><b>{{ t.hours }} ч</b><span class="muted small">гостей по ссылке — {{ t.guests }}</span></div>
+</div>
+
+<section class="card block">
+  <h2>Просмотры по дням</h2>
+  {% set top = s.daily|map(attribute="views")|max or 1 %}
+  <div class="bars" role="img" aria-label="Просмотры по дням">
+    {% for d in s.daily %}
+    <div class="bar" title="{{ d.day.strftime('%d.%m') }}: {{ d.views }} просм., {{ d.minutes }} мин">
+      <span class="v">{{ d.views or "" }}</span>
+      <i style="height: {{ (d.views / top * 100)|round }}%"></i>
+      <span class="d">{{ d.day.strftime('%d') }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="muted small">Просмотр — когда видео проиграло хотя бы 5 секунд. Наведи на столбик, чтобы увидеть минуты.</p>
+</section>
+
+<section class="card block">
+  <h2>Люди</h2>
+  <div class="scroll"><table>
+    <tr><th>Кто</th><th>Темы</th><th>Выпуск</th><th>Открыл</th><th>Досматривает</th><th>Последний раз</th></tr>
+    {% for p in s.people %}
+    <tr>
+      <td><b>{{ p.user.name }}</b><br><span class="muted small">с {{ p.user.created_at.strftime('%d.%m.%Y') }}</span></td>
+      <td>{% for tp in p.user.topics or topics if tp in topics %}<span class="dot" style="background: {{ topics[tp].color }}" title="{{ topics[tp].title }}"></span>{% endfor %}</td>
+      <td class="num">{{ p.user.minutes }} мин · {{ p.user.delivery_time }}</td>
+      <td class="num">{{ p.opened }} из {{ p.episodes }}</td>
+      <td class="share">{% if p.share is not none %}<span class="meter"><i style="width: {{ (p.share * 100)|round }}%"></i></span> {{ p.share|pct }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{{ p.last.strftime('%d.%m %H:%M') if p.last else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</section>
+
+{% if s.stops %}
+<section class="card block">
+  <h2>Где бросают</h2>
+  <p class="muted small">На каком блоке остановились те, кто не досмотрел свой выпуск.</p>
+  {% set most = s.stops[0][1] %}
+  {% for name, n in s.stops %}
+  <div class="hbar"><span>{{ name }}</span><span class="meter wide"><i style="width: {{ (n / most * 100)|round }}%"></i></span><span class="num">{{ n }}</span></div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card block">
+  <h2>Выпуски</h2>
+  <div class="scroll"><table>
+    <tr><th>Дата</th><th>Для кого</th><th>Длина</th><th>Досмотрел</th><th>Гости</th></tr>
+    {% for r in s.episodes %}
+    <tr>
+      <td class="num"><a href="/e/{{ r.ep.slug }}">{{ r.ep.edition[8:] }}.{{ r.ep.edition[5:7] }}</a></td>
+      <td>{{ r.owner }}</td>
+      <td class="num">{{ r.ep.duration|mmss }}</td>
+      <td class="share">{% if r.share is not none %}<span class="meter"><i style="width: {{ (r.share * 100)|round }}%"></i></span> {{ r.share|pct }}{% elif r.opened %}<span class="muted">открыл, не смотрел</span>{% else %}<span class="muted">не открывал</span>{% endif %}</td>
+      <td class="num">{{ r.guests or "" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">За этот период выпусков не было.</td></tr>
+    {% endfor %}
+  </table></div>
+</section>
+
+<section class="card block">
+  <h2>Система</h2>
+  <div class="scroll"><table>
+    <tr><th>Сюжеты дня</th><th>Статус</th><th>Не собрались</th></tr>
+    {% for e in s.editions %}
+    <tr><td class="num">{{ e.ed.date[8:] }}.{{ e.ed.date[5:7] }}</td>
+      <td>{% if e.ed.status == "ready" %}<span class="ok">✓ готово</span>{% elif e.ed.status == "failed" %}<span class="warn">✕ ошибка</span>{% else %}<span class="muted">собирается…</span>{% endif %}</td>
+      <td class="num">{% if e.failed %}<span class="warn">{{ e.failed }}</span>{% else %}0{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+</section>
+{% endblock %}

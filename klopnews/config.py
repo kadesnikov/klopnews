@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_bot_username: str = ""
     allowed_telegram_ids: str = ""  # через запятую; пусто — пускать всех
+    admin_telegram_ids: str = ""  # кому открыта /admin (через запятую)
 
     edition_time: str = "05:30"  # когда собирать сюжеты дня (по timezone)
     default_delivery_time: str = "07:30"
@@ -60,6 +61,10 @@ class Settings(BaseSettings):
     @property
     def allowed_ids(self) -> set[int]:
         return {int(x) for x in self.allowed_telegram_ids.replace(" ", "").split(",") if x}
+
+    @property
+    def admin_ids(self) -> set[int]:
+        return {int(x) for x in self.admin_telegram_ids.replace(" ", "").split(",") if x}
 
     @property
     def media_dir(self) -> Path:

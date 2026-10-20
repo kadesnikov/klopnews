@@ -82,6 +82,19 @@ class Episode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class View(Base):
+    """Один просмотр страницы выпуска: плеер раз в несколько секунд сообщает, докуда досмотрели."""
+    __tablename__ = "views"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(32), unique=True)  # генерирует страница при открытии
+    episode_id: Mapped[int] = mapped_column(ForeignKey("episodes.id"), index=True)
+    viewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # None — гость по ссылке
+    max_t: Mapped[float] = mapped_column(Float, default=0.0)  # самая дальняя точка, секунды
+    played: Mapped[float] = mapped_column(Float, default=0.0)  # сколько секунд реально играло
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 @lru_cache
 def engine(url: str):
     eng = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
