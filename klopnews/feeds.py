@@ -38,7 +38,7 @@ def parse(source_id: str, raw: bytes | str) -> list[dict]:
     out = []
     for e in feed.entries:
         url, title = e.get("link"), clean(e.get("title", ""))
-        if not url or not title:
+        if not url or not title or "/videos/" in url:  # ролики (анонсы эфиров) — сюжета из них не сделать
             continue
         t = e.get("published_parsed") or e.get("updated_parsed")
         out.append({

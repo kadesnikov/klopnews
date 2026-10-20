@@ -1,9 +1,13 @@
 """Озвучка в WAV с кэшем на диске по хешу (модель, голос, инструкция, текст).
 
-openai — любой OpenAI-совместимый /audio/speech, сырой PCM 24 кГц (gpt-4o-mini-tts понимает instructions: характер голоса)
-dummy  — без ключа: «бу-бу-бу» по слогам, чтобы рот Клопа двигался при локальной разработке
+openai     — любой OpenAI-совместимый /audio/speech, сырой PCM 24 кГц (gpt-4o-mini-tts понимает instructions)
+elevenlabs — ElevenLabs, голос = voice_id; лучший русский, но дороже
+dummy      — без ключа: «бу-бу-бу» по слогам, чтобы рот Клопа двигался при локальной разработке
+
+Все модели читают медленнее телеведущих, поэтому дорожка ускоряется на tts_speed без смены тона.
 """
 import hashlib
+import subprocess
 import wave
 from pathlib import Path
 
@@ -16,7 +20,7 @@ RATE = 24000  # gpt-4o-mini-tts отдаёт 24 кГц моно
 
 
 def synthesize(text: str, voice: str, instructions: str, s: Settings) -> Path:
-    key = f"{s.tts_provider}|{s.tts_model}|{voice}|{instructions}|{text}"
+    key = f"{s.tts_provider}|{s.tts_model}|{voice}|{instructions}|{s.tts_speed}|{text}"
     path = s.media_dir / "tts" / f"{hashlib.sha256(key.encode()).hexdigest()[:24]}.wav"
     if path.exists():
         return path
@@ -24,13 +28,25 @@ def synthesize(text: str, voice: str, instructions: str, s: Settings) -> Path:
     tmp = path.with_suffix(".part")
     if s.tts_provider == "dummy":
         write_wav(tmp, babble(text))
+        tmp.rename(path)
+        return path
+    if s.tts_provider == "elevenlabs":
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=pcm_{RATE}", timeout=180,
+                       headers={"xi-api-key": s.tts_api_key},
+                       json={"text": text, "model_id": s.tts_model, "language_code": "ru"})
     else:
         r = httpx.post(f"{s.tts_base_url.rstrip('/')}/audio/speech", timeout=180,
                        headers={"Authorization": f"Bearer {s.tts_api_key}"},
                        json={"model": s.tts_model, "voice": voice, "input": text,
                              "instructions": instructions, "response_format": "pcm"})
-        r.raise_for_status()
-        write_wav(tmp, np.frombuffer(r.content[: len(r.content) // 2 * 2], dtype="<i2").astype(np.float32) / 32768)
+    r.raise_for_status()
+    write_wav(tmp, np.frombuffer(r.content[: len(r.content) // 2 * 2], dtype="<i2").astype(np.float32) / 32768)
+    if abs(s.tts_speed - 1) > 0.01:
+        fast = path.with_suffix(".fast.wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tmp), "-filter:a", f"atempo={s.tts_speed}",
+                        "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(fast)], check=True)
+        tmp.unlink()
+        tmp = fast
     tmp.rename(path)
     return path
 

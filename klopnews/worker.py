@@ -81,6 +81,8 @@ def tick(s: Settings, last_fetch: float) -> float:
 def main() -> None:
     setup_logging()
     s = settings()
+    if not s.public_url.startswith("https://"):
+        log.warning("PUBLIC_URL=%s — ссылки в Telegram будут без кнопки и не откроются снаружи", s.public_url)
     if s.telegram_bot_token:
         threading.Thread(target=bot.poll_forever, args=(s, make_now), daemon=True).start()
     last_fetch = 0.0

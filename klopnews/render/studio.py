@@ -117,6 +117,7 @@ class Scene:
     quotes: list[dict] = field(default_factory=list)  # блок рынков
     subtitle: str = ""  # крупная вторая строка на карточке (интро/финал)
     pills: list[tuple[str, str]] = field(default_factory=list)  # [(текст, цвет)] — темы в интро
+    ticker: str = ""  # бегущая строка внизу: главные заголовки дня
 
 
 def _background(seed: int) -> Image.Image:
@@ -165,10 +166,10 @@ def _chrome(img: Image.Image, sc: Scene, live: str):
         x = pill(d, 24, 606, sc.tag or "НОВОСТИ", hex_rgb(sc.color), 20) if sc.tag else 24
         d.text((x + 16, 616), ellipsize(lower, font(22, "SemiBold"), W - 60 - x), font=font(22, "SemiBold"), fill=(15, 20, 35))
     d.rectangle([0, 672, W, H], fill=(8, 14, 34))
-    d.rectangle([0, 672, 210, H], fill=YELLOW)
-    d.text((18, 685), "НОВОСТИ ДНЯ", font=font(20), fill=(15, 20, 35))
-    d.text((232, 687), "Семейный выпуск  •  только проверенные источники  •  ссылки на оригиналы — под видео",
-           font=font(18, "Medium"), fill=MUTED)
+    _ticker_label(d)
+    if not sc.ticker:
+        d.text((TICKER_X + 22, 687), "Семейный выпуск  •  ссылки на оригиналы — под видео",
+               font=font(18, "Medium"), fill=MUTED)
     if sc.nameplate:
         name, role = sc.nameplate
         x0, y0 = (40, 528) if sc.kind == "studio" else (40, 520)
@@ -177,6 +178,25 @@ def _chrome(img: Image.Image, sc: Scene, live: str):
         d.rectangle([x0, y0, x0 + 6, y0 + 70], fill=RED)
         d.text((x0 + 20, y0 + 6), name, font=font(28), fill=(15, 20, 35))
         d.text((x0 + 20, y0 + 42), role, font=font(16, "Medium"), fill=(90, 98, 120))
+
+
+TICKER_X, TICKER_Y, TICKER_SPEED = 170, 672, 90  # px/с
+
+
+def _ticker_label(d: ImageDraw.ImageDraw):
+    d.rectangle([0, TICKER_Y, TICKER_X, H], fill=YELLOW)
+    d.text((18, TICKER_Y + 13), "ГЛАВНОЕ", font=font(20), fill=(15, 20, 35))
+
+
+def _ticker_strip(text: str) -> tuple[Image.Image, int]:
+    """Полоса с текстом, повторённым столько раз, чтобы при прокрутке не было пустоты. → (картинка, период)."""
+    f = font(19, "Medium")
+    unit = text + "     •     "
+    period = int(f.getlength(unit))
+    reps = 2 + (W - TICKER_X) // max(period, 1)
+    strip = Image.new("RGB", (period * reps, H - TICKER_Y), (8, 14, 34))
+    ImageDraw.Draw(strip).text((0, 14), unit * reps, font=f, fill=(225, 230, 242))
+    return strip, period
 
 
 CARD = (560, 84, W - 40, 572)
@@ -215,7 +235,7 @@ def _card(img: Image.Image, sc: Scene) -> tuple[int, int, int]:
         return x0 + 30, y1, 0
     bw = x1 - x0 - 60
     if sc.image is not None:
-        iw, ih = 300, 190
+        iw, ih = 250, 160
         thumb = cover(sc.image, iw, ih)
         img.paste(thumb, (x1 - 30 - iw, y1 - 30 - ih))
         bw -= iw + 24
@@ -236,19 +256,35 @@ def _quotes(d, quotes, x, y, w):
         y += 48
 
 
-def _bullets_layer(sc: Scene, area: tuple[int, int, int], k: int) -> Image.Image | None:
-    if not k or not area[2]:
+def fit_bullets(bullets: list[str], area: tuple[int, int, int], bottom: int) -> tuple[ImageFont.FreeTypeFont, list[list[str]]]:
+    """Самый крупный шрифт, при котором пункты целиком помещаются до bottom; не влезло и на мелком — режем хвост."""
+    x, y0, w = area
+    for size in (24, 22, 20):
+        f = font(size, "Medium")
+        out, y = [], y0
+        for b in bullets:
+            lines = wrap(b, f, w - 28, 3)
+            y += len(lines) * (size + 8) + 12
+            if y > bottom:
+                break
+            out.append(lines)
+        if len(out) == len(bullets):
+            return f, out
+    return f, out
+
+
+def _bullets_layer(sc: Scene, area: tuple[int, int, int], fitted, k: int) -> Image.Image | None:
+    f, blocks = fitted
+    if not k or not area[2] or not blocks:
         return None
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    x, y, w = area
-    f = font(24, "Medium")
-    for b in sc.bullets[:k]:
-        lines = wrap(b, f, w - 28, 2)
-        d.rectangle([x, y + 9, x + 10, y + 19], fill=hex_rgb(sc.color))
+    x, y, _ = area
+    for lines in blocks[:k]:
+        d.rectangle([x, y + f.size // 2 - 4, x + 10, y + f.size // 2 + 6], fill=hex_rgb(sc.color))
         for line in lines:
             d.text((x + 26, y), line, font=f, fill=INK)
-            y += 32
+            y += f.size + 8
         y += 12
     return layer
 
@@ -278,11 +314,12 @@ class Frames:
     def __init__(self, sc: Scene):
         self.sc = sc
         if sc.kind == "report":
-            self.base, self.area = _report_base(sc), (0, 0, 0)
+            self.base, self.area, self.fitted = _report_base(sc), (0, 0, 0), (None, [])
             _chrome(self.base, sc, "ПРЯМОЕ ВКЛЮЧЕНИЕ")
         else:
             self.base = _background(len(sc.title))
             self.area = _card(self.base, sc)
+            self.fitted = fit_bullets(sc.bullets, self.area, CARD[3] - 24) if self.area[2] else (None, [])
             d = ImageDraw.Draw(self.base)
             d.rectangle([0, 506, 540, 600], fill=(20, 32, 72))
             d.rectangle([0, 500, 540, 506], fill=RED)
@@ -299,7 +336,7 @@ class Frames:
             sprite = characters.anchor(mouth, blink, sway).crop((0, 0, 440, 400))
             img.paste(sprite, (60, 100), sprite)  # низ спрайта спрятан за столом (y=500)
         if k not in self.layers:
-            self.layers[k] = _bullets_layer(self.sc, self.area, k)
+            self.layers[k] = _bullets_layer(self.sc, self.area, self.fitted, k)
         if self.layers[k] is not None:
             img.paste(self.layers[k], (0, 0), self.layers[k])
         return img
@@ -348,7 +385,7 @@ def render_segment(sc: Scene, wav: Path, out: Path, lead: float = 0.3, tail: flo
         write_wav(tmp / "a.wav", samples, rate)
         names: dict[tuple, str] = {}
         lines = []
-        for state, dur in timeline(samples, rate, len(sc.bullets), seed=len(sc.title)):
+        for state, dur in timeline(samples, rate, len(frames.fitted[1]), seed=len(sc.title)):
             if state not in names:
                 names[state] = f"f{len(names)}.png"
                 frames.render(*state).save(tmp / names[state], compress_level=1)
@@ -356,9 +393,20 @@ def render_segment(sc: Scene, wav: Path, out: Path, lead: float = 0.3, tail: flo
         lines.append(lines[-2])  # concat-демуксер: последний кадр повторяется без длительности
         (tmp / "list.txt").write_text("\n".join(lines))
         out.parent.mkdir(parents=True, exist_ok=True)
-        ffmpeg(["-f", "concat", "-safe", "0", "-i", str(tmp / "list.txt"), "-i", str(tmp / "a.wav"),
-                *ENCODE, "-shortest", str(out)])
-    return len(samples) / rate
+        dur = len(samples) / rate
+        inputs = ["-f", "concat", "-safe", "0", "-i", str(tmp / "list.txt"), "-i", str(tmp / "a.wav")]
+        if sc.ticker:
+            strip, period = _ticker_strip(sc.ticker)
+            strip.save(tmp / "strip.png")
+            lab = Image.new("RGB", (W, H))
+            _ticker_label(ImageDraw.Draw(lab))
+            lab.crop((0, TICKER_Y, TICKER_X, H)).save(tmp / "label.png")
+            inputs += ["-loop", "1", "-i", str(tmp / "strip.png"), "-loop", "1", "-i", str(tmp / "label.png")]
+            graph = (f"[0:v]fps={FPS}[b];[b][2:v]overlay=x='{TICKER_X}-mod(t*{TICKER_SPEED},{period})':y={TICKER_Y}[c];"
+                     f"[c][3:v]overlay=0:{TICKER_Y}[v]")
+            inputs += ["-filter_complex", graph, "-map", "[v]", "-map", "1:a"]
+        ffmpeg([*inputs, *ENCODE, "-t", f"{dur:.3f}", str(out)])
+    return dur
 
 
 def concat(clips: list[Path], out: Path) -> float:

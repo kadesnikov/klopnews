@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -32,6 +32,11 @@ def page(request: Request, name: str, **ctx) -> HTMLResponse:
     s = settings()
     return templates.TemplateResponse(request, name, {"bot": s.telegram_bot_username, "public_url": s.public_url,
                                                       "topics": catalog()["topics"], **ctx})
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots():
+    return "User-agent: *\nDisallow: /\n"  # семейный сайт: выпуски открываются только по ссылке, поисковикам нечего индексировать
 
 
 @app.get("/health")

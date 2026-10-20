@@ -28,14 +28,14 @@ def _anchor_wav(text: str, s: Settings) -> Path:
     return synthesize(text, s.anchor_voice, s.anchor_instructions, s)
 
 
-def render_story(st: Story, s: Settings, cat: dict) -> None:
+def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
     color = cat["topics"].get(st.topic, {}).get("color", "#3b82f6")
     image = studio.fetch_image(st.image_url, s.media_dir / "img")
     base = s.media_dir / "clips" / st.edition
     label = date_label(st.edition)
     scene = studio.Scene(kind="studio", date_label=label, tag=st.tag or cat["topics"][st.topic]["title"].upper(),
                          color=color, title=st.headline, bullets=st.bullets, image=image,
-                         quotes=st.data.get("quotes", []))
+                         quotes=st.data.get("quotes", []), ticker=ticker)
     if st.kind == "brief":
         scene.lower = f"Коротко: {st.headline}"
     out = base / f"{st.id}.mp4"
@@ -47,7 +47,8 @@ def render_story(st: Story, s: Settings, cat: dict) -> None:
         report = studio.Scene(kind="report", date_label=label, tag=st.place.upper() if st.place else "НА МЕСТЕ",
                               color="#ff5fa2", title=st.place or st.headline, image=image,
                               image_credit=st.sources[0]["name"] if image and st.sources else "",
-                              lower=st.headline, nameplate=("Клопик", f"корреспондент · {st.place or 'на месте событий'}"))
+                              lower=st.headline, nameplate=("Клопик", f"корреспондент · {st.place or 'на месте событий'}"),
+                              ticker=ticker)
         studio.render_segment(report, synthesize(st.reporter_script, s.reporter_voice, s.reporter_instructions, s), b)
         st.duration = studio.concat([a, b], out)
         a.unlink()
@@ -74,15 +75,22 @@ def build_edition(db, s: Settings, edition: str, now: datetime) -> None:
         db.commit()  # сразу: перезапуск воркера не потеряет написанное
     todo = db.scalars(select(Story).where(Story.edition == edition, Story.status != "ready")
                       .order_by(Story.importance.desc())).all()
+    tick = ticker_text(db.scalars(select(Story).where(Story.edition == edition)).all())
     for st in todo:
         try:
-            render_story(st, s, cat)
+            render_story(st, s, cat, tick)
         except Exception as e:
             log.exception("render_failed story=%s: %r", st.id, e)
             st.status = "failed"
         db.commit()
     ed.status = "ready"
     db.commit()
+
+
+def ticker_text(stories: list[Story], n: int = 10) -> str:
+    """Бегущая строка: главные заголовки дня (общая для всех клипов дня — клипы рендерятся один раз на всех)."""
+    top = sorted((st for st in stories if st.kind == "story"), key=lambda x: -x.importance)[:n]
+    return "     •     ".join(st.headline for st in top)
 
 
 def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]:
@@ -128,14 +136,16 @@ def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
                          subtitle=f"Выпуск на {label}", color="#e23636",
                          pills=[(cat["topics"][t]["title"], cat["topics"][t]["color"]) for t in topics],
                          lower="Ваш персональный выпуск новостей", tag="КЛОП·НОВОСТИ",
-                         nameplate=("Клоп Александрович", "ведущий · AI-ассистент · клоп в машине"))
+                         nameplate=("Клоп Александрович", "ведущий · AI-ассистент · клоп в машине"),
+                         ticker=ticker_text(picked))
     intro_path = work / f"intro_{ep.slug}.mp4"
     intro_dur = studio.render_segment(intro, _anchor_wav(intro_script(user, picked), s), intro_path,
                                       prefix=studio.jingle(RATE))
     outro_path = work / "outro.mp4"
     if not outro_path.exists():
         outro = studio.Scene(kind="studio", date_label=label, title="До завтра!", subtitle="Клоп·Новости — семейный выпуск",
-                             color="#e23636", lower="Ссылки на все источники — под видео", tag="КЛОП·НОВОСТИ")
+                             color="#e23636", lower="Ссылки на все источники — под видео", tag="КЛОП·НОВОСТИ",
+                             ticker=ticker_text(stories))
         studio.render_segment(outro, _anchor_wav(OUTRO, s), outro_path, suffix=studio.jingle(RATE, up=False))
 
     chapters, t = [{"t": 0, "title": "Начало выпуска", "topic": "", "sources": []}], intro_dur
