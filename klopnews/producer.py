@@ -1,5 +1,6 @@
 """Производство: сюжеты дня → клипы (один раз на всех) → персональные выпуски (склейка под каждого)."""
 import fcntl
+import hashlib
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -188,11 +189,13 @@ def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     intro_dur = studio.render_segment(intro, _anchor_wav(intro_script(user, picked), s), intro_path,
                                       prefix=studio.jingle(RATE))
     outro_wav = _anchor_wav(OUTRO, s)
-    outro_path = work / f"outro_{outro_wav.stem}.mp4"  # имя от озвучки: сменили голос — финал перерендерится
+    outro = studio.Scene(kind="studio", date_label=label, title="До завтра!", subtitle="Клоп·Новости — семейный выпуск",
+                         color="#e23636", lower="Ссылки на все источники — под видео  •  made by kadesnikov.com",
+                         tag="КЛОП·НОВОСТИ", ticker=ticker_text(stories))
+    # имя от озвучки и надписей: сменили голос или текст на экране — финал перерендерится
+    key = hashlib.sha256(f"{outro_wav.stem}|{outro.title}|{outro.subtitle}|{outro.lower}".encode()).hexdigest()[:12]
+    outro_path = work / f"outro_{key}.mp4"
     if not outro_path.exists():
-        outro = studio.Scene(kind="studio", date_label=label, title="До завтра!", subtitle="Клоп·Новости — семейный выпуск",
-                             color="#e23636", lower="Ссылки на все источники — под видео", tag="КЛОП·НОВОСТИ",
-                             ticker=ticker_text(stories))
         studio.render_segment(outro, outro_wav, outro_path, suffix=studio.jingle(RATE, up=False))
 
     chapters, t = [{"t": 0, "title": "Начало выпуска", "topic": "", "sources": []}], intro_dur
