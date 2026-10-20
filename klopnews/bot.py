@@ -68,7 +68,36 @@ def handle(s: Settings, msg: dict, make_now) -> None:
                  ("⚙️ Открыть настройки", login_url(s, user, "/settings")))
 
 
+NAME = "Клоп·Новости"
+SHORT = "Твой видеовыпуск новостей каждое утро: ведущий Клоп Александрович и корреспондент Клопик 🐞"
+DESCRIPTION = (
+    "🐞 Клоп·Новости — семейный видеовыпуск новостей.\n\n"
+    "Каждое утро ведущий Клоп Александрович рассказывает главное за сутки, а корреспондент Клопик "
+    "выходит в прямое включение с места событий.\n\n"
+    "• Только твои темы: ИИ и технологии, мир, Чехия и Прага, наука и космос, рынки\n"
+    "• Свои источники и длительность — от 5 до 20 минут\n"
+    "• Под каждым сюжетом ссылка на оригинал\n\n"
+    "Нажми «Старт», чтобы получить первый выпуск."
+)
+COMMANDS = [{"command": "now", "description": "Собрать выпуск прямо сейчас"},
+            {"command": "settings", "description": "Темы, источники и время выпуска"},
+            {"command": "start", "description": "Что умеет Клоп"}]
+
+
+def apply_branding(s: Settings) -> None:
+    """Имя, описание и меню команд бот выставляет себе сам — в BotFather руками остаются только картинки."""
+    for method, params in [("setMyName", {"name": NAME}), ("setMyShortDescription", {"short_description": SHORT}),
+                           ("setMyDescription", {"description": DESCRIPTION}), ("setMyCommands", {"commands": COMMANDS})]:
+        try:
+            res = api(s, method, **params)
+            if not res.get("ok"):
+                log.warning("branding %s: %s", method, res.get("description"))
+        except Exception as e:
+            log.warning("branding %s failed: %r", method, e)
+
+
 def poll_forever(s: Settings, make_now) -> None:
+    apply_branding(s)
     offset = 0
     while True:
         try:
