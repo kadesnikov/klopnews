@@ -49,6 +49,8 @@ def main(argv: list[str]) -> None:
                 for st in db.scalars(select(Story).where(Story.edition == ed)).all():
                     st.status = "new"
                 db.commit()
+                for old in (s.media_dir / "clips" / ed).glob("outro*.mp4"):  # финал общий на день — тоже заново
+                    old.unlink()
                 producer.build_edition(db, s, ed, utcnow(), write=False)
         elif cmd == "episode":
             user = db.scalar(select(User).where(User.tg_id == int(argv[1])))

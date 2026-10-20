@@ -187,12 +187,13 @@ def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     intro_path = work / f"intro_{ep.slug}.mp4"
     intro_dur = studio.render_segment(intro, _anchor_wav(intro_script(user, picked), s), intro_path,
                                       prefix=studio.jingle(RATE))
-    outro_path = work / "outro.mp4"
+    outro_wav = _anchor_wav(OUTRO, s)
+    outro_path = work / f"outro_{outro_wav.stem}.mp4"  # имя от озвучки: сменили голос — финал перерендерится
     if not outro_path.exists():
         outro = studio.Scene(kind="studio", date_label=label, title="До завтра!", subtitle="Клоп·Новости — семейный выпуск",
                              color="#e23636", lower="Ссылки на все источники — под видео", tag="КЛОП·НОВОСТИ",
                              ticker=ticker_text(stories))
-        studio.render_segment(outro, _anchor_wav(OUTRO, s), outro_path, suffix=studio.jingle(RATE, up=False))
+        studio.render_segment(outro, outro_wav, outro_path, suffix=studio.jingle(RATE, up=False))
 
     chapters, t = [{"t": 0, "title": "Начало выпуска", "topic": "", "sources": []}], intro_dur
     for st in picked:
