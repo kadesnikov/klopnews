@@ -16,6 +16,9 @@
   <nav>{% if user %}<a href="/">Выпуски</a><a href="/settings">Настройки</a>{% elif bot %}<a href="https://t.me/{{ bot }}">Войти через Telegram</a>{% endif %}</nav>
 </header>
 <main>{% block main %}{% endblock %}</main>
-<footer>Семейный проект 🐞 Сюжеты пишет ИИ по материалам источников — ссылки на оригиналы всегда под видео.</footer>
+<footer>
+  <p>Семейный проект 🐞 Сюжеты пишет ИИ по материалам источников — ссылки на оригиналы всегда под видео.</p>
+  <p class="made">Made by <a href="https://kadesnikov.com/" target="_blank" rel="noopener">kadesnikov.com</a></p>
+</footer>
 </body>
 </html>
