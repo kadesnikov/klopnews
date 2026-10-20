@@ -35,7 +35,7 @@ SELECT = PERSONA + """
 
 Ты выпускающий редактор. Из новостей за сутки по теме «{topic}» выбери до {n} самых важных и интересных событий.
 Одна история из разных источников — одно событие: перечисли все её номера.
-Пропускай рекламу, мелочи, гороскопы, спорт без большого повода и повторы вчерашних тем без нового развития.
+Пропускай рекламу, мелочи, гороскопы, спорт без большого повода и то, что уже было в эфире, если нет нового развития.
 importance — 1..10, насколько событие важно и интересно. reporter_ok — true, если у события есть конкретное место
 (город, площадка, космодром), куда можно «отправить корреспондента», и это не трагедия.
 Ответ — только JSON: {{"events": [{{"items": [3, 7], "importance": 8, "reporter_ok": false}}]}}"""
@@ -75,9 +75,10 @@ def blocked_by_filter(e: Exception) -> bool:
     return "content_filter" in str(e) or "high risk" in str(e)
 
 
-def select_events(llm, topic_title: str, items: list[Item], sources: dict, yesterday: list[str], n: int) -> list[dict]:
+def select_events(llm, topic_title: str, items: list[Item], sources: dict, covered: list[str], n: int) -> list[dict]:
     lines = [f"[{i}] ({sources[it.source_id]['name']}) {it.title} — {it.summary[:200]}" for i, it in enumerate(items)]
-    user = ("Вчера уже были: " + ("; ".join(yesterday) or "—") + "\n\nНовости:\n" + "\n".join(lines))
+    user = ("Уже были в эфире (не повторять, если нет нового развития): " + ("; ".join(covered) or "—")
+            + "\n\nНовости:\n" + "\n".join(lines))
     try:
         events = ask_json(llm, SELECT.format(topic=topic_title, n=n), user).get("events", [])
     except Exception as e:
@@ -88,8 +89,8 @@ def select_events(llm, topic_title: str, items: list[Item], sources: dict, yeste
             return []
         # делим пополам, пока не отсеется новость, которая не нравится фильтру
         half = len(items) // 2
-        both = (select_events(llm, topic_title, items[:half], sources, yesterday, n)
-                + select_events(llm, topic_title, items[half:], sources, yesterday, n))
+        both = (select_events(llm, topic_title, items[:half], sources, covered, n)
+                + select_events(llm, topic_title, items[half:], sources, covered, n))
         return sorted(both, key=lambda e: -e["importance"])[:n]
     out = []
     for ev in events:
@@ -152,9 +153,10 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
         if not items:
             log.warning("no items for topic %s", topic)
             continue
-        yesterday = list(db.scalars(select(Story.headline).where(Story.edition == yday, Story.topic == topic)))
+        # вчерашние и уже написанные сегодня (если сборка дописывает день): иначе одно событие придёт дважды
+        covered = list(db.scalars(select(Story.headline).where(Story.edition.in_([yday, edition]), Story.topic == topic)))
         try:
-            events = select_events(llm, meta["title"], items, sources, yesterday, per_topic)
+            events = select_events(llm, meta["title"], items, sources, covered, per_topic)
             picked += [(topic, ev) for ev in events]
             log.info("тема %s: %d новостей → %d событий", topic, len(items), len(events))
         except Exception as e:

@@ -27,3 +27,12 @@ def test_intro_greets_by_time():
     u = User(name="Маша", delivery_time="19:00")
     text = intro_script(u, [st("ai", 9, 60), st("ai", 8, 60)])
     assert text.startswith("Добрый вечер, Маша!") and "ai9 и ai8" in text
+
+
+def test_same_event_twice_is_shown_once():
+    stories = [st("finance", 9, 30), st("finance", 8, 30), st("finance", 7, 30)]
+    stories[0].headline = "Владелец GCash вышел на биржу с рекордным IPO на Филиппинах"
+    stories[1].headline = "Владелец GCash готов покупать конкурентов после IPO"
+    stories[2].headline = "Maersk строит железнодорожную сеть во Вьетнаме"
+    picked = pick_stories(User(topics=[], muted_sources=[]), stories, 600)
+    assert [p.importance for p in picked] == [9, 7]

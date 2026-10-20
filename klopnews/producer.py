@@ -1,6 +1,8 @@
 """Производство: сюжеты дня → клипы (один раз на всех) → персональные выпуски (склейка под каждого)."""
 import fcntl
 import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
@@ -90,6 +92,7 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
     todo = db.scalars(select(Story).where(Story.edition == edition, Story.status != "ready")
                       .order_by(Story.importance.desc())).all()
     tick = ticker_text(db.scalars(select(Story).where(Story.edition == edition)).all())
+    prefetch_audio(todo, s)
     for i, st in enumerate(todo, 1):
         try:
             render_story(st, s, cat, tick)
@@ -103,10 +106,33 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
     log.info("выпуск дня %s готов", edition)
 
 
+def prefetch_audio(stories: list[Story], s: Settings, workers: int = 4) -> None:
+    """Озвучка — сетевой запрос на 5–15 с, а рендер ждёт её по очереди. Заказываем всю разом в несколько потоков."""
+    jobs = [(st.script, s.anchor_voice, s.anchor_instructions) for st in stories]
+    jobs += [(st.reporter_script, s.reporter_voice, s.reporter_instructions) for st in stories if st.reporter_script]
+
+    def one(job):
+        try:
+            synthesize(*job, s)
+        except Exception as e:  # не страшно: рендер попробует ещё раз и честно упадёт
+            log.warning("tts_prefetch_failed: %r", e)
+
+    with ThreadPoolExecutor(workers) as pool:
+        list(pool.map(one, jobs))
+    log.info("озвучено сюжетов: %d", len(jobs))
+
+
 def ticker_text(stories: list[Story], n: int = 10) -> str:
     """Бегущая строка: главные заголовки дня (общая для всех клипов дня — клипы рендерятся один раз на всех)."""
     top = sorted((st for st in stories if st.kind == "story"), key=lambda x: -x.importance)[:n]
     return "     •     ".join(st.headline for st in top)
+
+
+def _key_words(headline: str) -> set[str]:
+    """Имена, названия и числа из заголовка, обрезанные до 5 букв: «Вьетнаме» и «Вьетнам» совпадут."""
+    words = re.findall(r"[\w,.]+", headline)
+    return {w.strip(",.")[:5].lower() for w in words
+            if w[:1].isupper() or any(c.isdigit() for c in w) or w.isascii() and w[:1].isalpha()}
 
 
 def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]:
@@ -118,10 +144,14 @@ def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]
     ok = [st for st in stories if st.status == "ready"
           and (not user.topics or st.topic in user.topics)
           and (st.kind == "markets" or any(src["id"] not in muted for src in st.sources))]
-    chosen, used = [], 0.0
+    chosen, used, seen = [], 0.0, []
     for st in sorted(ok, key=lambda x: -x.importance):
+        keys = _key_words(st.headline)
+        if any(len(keys & k) >= 2 for k in seen):  # то же событие другим сюжетом (GCash и GCash, Maersk и Maersk)
+            continue
         if used + st.duration <= budget:
             chosen.append(st)
+            seen.append(keys)
             used += st.duration
     rank = {"story": 0, "markets": 1, "brief": 2}
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))
