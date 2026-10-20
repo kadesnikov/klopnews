@@ -84,3 +84,26 @@ def test_next_day_skips_items_already_used(monkeypatch):
         producer.build_edition(db, s, "2026-10-20", utcnow())
         today = db.query(Story).filter(Story.edition == "2026-10-20").all()
         assert [st.sources[0]["url"] for st in today] == ["https://ex.com/new"]
+
+
+def test_rerender_only_renders(monkeypatch):
+    monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
+    monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [])
+    rendered = []
+    monkeypatch.setattr("klopnews.render.studio.render_segment", lambda sc, *a, **k: rendered.append(sc.title) or 1.0)
+    s = settings()
+    with session() as db:
+        db.add(Item(source_id="verge", url="https://ex.com/1", title="Первая", summary="",
+                    published_at=utcnow() - timedelta(hours=1)))
+        db.commit()
+        with producer.build_lock(s):
+            producer.build_edition(db, s, "2026-10-20", utcnow())
+        db.add(Item(source_id="verge", url="https://ex.com/2", title="Свежая", summary="",
+                    published_at=utcnow() - timedelta(minutes=5)))
+        for st in db.query(Story).all():
+            st.status = "new"
+        db.commit()
+        rendered.clear()
+        with producer.build_lock(s):
+            producer.build_edition(db, s, "2026-10-20", utcnow(), write=False)
+        assert db.query(Story).count() == 1 and len(rendered) >= 1  # перерисовали, новых сюжетов не писали

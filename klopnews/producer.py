@@ -1,5 +1,7 @@
 """Производство: сюжеты дня → клипы (один раз на всех) → персональные выпуски (склейка под каждого)."""
+import fcntl
 import logging
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
@@ -57,34 +59,48 @@ def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
     st.status = "ready"
 
 
-def build_edition(db, s: Settings, edition: str, now: datetime) -> None:
-    """Тексты, озвучка и клипы всех сюжетов дня.
+@contextmanager
+def build_lock(s: Settings):
+    """Одно производство на сервер: воркер и ручные команды из cli не рендерят одно и то же параллельно."""
+    s.data_dir.mkdir(parents=True, exist_ok=True)
+    with open(s.data_dir / "build.lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = True) -> None:
+    """Тексты, озвучка и клипы всех сюжетов дня. Вызывать под build_lock.
 
     Повторный вызов (после перезапуска воркера) не переписывает готовое: дописывает новые события и рендерит недостающее.
+    write=False — только озвучить и отрендерить то, что не готово (rerender).
     """
     ed = db.get(Edition, edition) or Edition(date=edition)
     ed.status = "building"
     db.add(ed)
     db.commit()
     cat = catalog()
-    have = db.scalars(select(Story).where(Story.edition == edition)).all()
-    done = frozenset(src["url"] for st in have for src in st.sources)
-    for st in editor.build_stories(db, make_llm(s), cat, edition, now, s.reporter_enabled, s.reporters_per_edition,
-                                   done_urls=done, markets_done=any(st.kind == "markets" for st in have)):
-        db.add(st)
-        db.commit()  # сразу: перезапуск воркера не потеряет написанное
+    if write:
+        have = db.scalars(select(Story).where(Story.edition == edition)).all()
+        done = frozenset(src["url"] for st in have for src in st.sources)
+        for st in editor.build_stories(db, make_llm(s), cat, edition, now, s.reporter_enabled, s.reporters_per_edition,
+                                       done_urls=done, markets_done=any(st.kind == "markets" for st in have)):
+            db.add(st)
+            db.commit()  # сразу: перезапуск воркера не потеряет написанное
+            log.info("сюжет написан: [%s] %s", st.topic, st.headline)
     todo = db.scalars(select(Story).where(Story.edition == edition, Story.status != "ready")
                       .order_by(Story.importance.desc())).all()
     tick = ticker_text(db.scalars(select(Story).where(Story.edition == edition)).all())
-    for st in todo:
+    for i, st in enumerate(todo, 1):
         try:
             render_story(st, s, cat, tick)
+            log.info("клип %d/%d готов: %s", i, len(todo), st.headline)
         except Exception as e:
             log.exception("render_failed story=%s: %r", st.id, e)
             st.status = "failed"
         db.commit()
     ed.status = "ready"
     db.commit()
+    log.info("выпуск дня %s готов", edition)
 
 
 def ticker_text(stories: list[Story], n: int = 10) -> str:

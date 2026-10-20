@@ -154,7 +154,9 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
             continue
         yesterday = list(db.scalars(select(Story.headline).where(Story.edition == yday, Story.topic == topic)))
         try:
-            picked += [(topic, ev) for ev in select_events(llm, meta["title"], items, sources, yesterday, per_topic)]
+            events = select_events(llm, meta["title"], items, sources, yesterday, per_topic)
+            picked += [(topic, ev) for ev in events]
+            log.info("тема %s: %d новостей → %d событий", topic, len(items), len(events))
         except Exception as e:
             log.error("select_failed %s: %r", topic, e)
 

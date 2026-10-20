@@ -29,8 +29,12 @@ def edition_date(s: Settings) -> str:
 
 def ensure_edition(db, s: Settings) -> str:
     ed = edition_date(s)
-    if (row := db.get(Edition, ed)) is None or row.status != "ready":
-        producer.build_edition(db, s, ed, local_now(s).astimezone(ZoneInfo("UTC")).replace(tzinfo=None))
+    if (row := db.get(Edition, ed)) is not None and row.status == "ready":
+        return ed
+    with producer.build_lock(s):  # пока cli что-то пересобирает — ждём его, а не дублируем
+        db.expire_all()
+        if (row := db.get(Edition, ed)) is None or row.status != "ready":
+            producer.build_edition(db, s, ed, local_now(s).astimezone(ZoneInfo("UTC")).replace(tzinfo=None))
     return ed
 
 

@@ -41,13 +41,15 @@ def main(argv: list[str]) -> None:
         if cmd == "fetch":
             print("new items:", feeds.fetch_all(catalog()["sources"]))
         elif cmd == "edition":
-            producer.build_edition(db, s, edition_date(s), utcnow())
+            with producer.build_lock(s):
+                producer.build_edition(db, s, edition_date(s), utcnow())
         elif cmd == "rerender":
             ed = edition_date(s)
-            for st in db.scalars(select(Story).where(Story.edition == ed)).all():
-                st.status = "new"
-            db.commit()
-            producer.build_edition(db, s, ed, utcnow())
+            with producer.build_lock(s):
+                for st in db.scalars(select(Story).where(Story.edition == ed)).all():
+                    st.status = "new"
+                db.commit()
+                producer.build_edition(db, s, ed, utcnow(), write=False)
         elif cmd == "episode":
             user = db.scalar(select(User).where(User.tg_id == int(argv[1])))
             ep = producer.assemble(db, s, user, edition_date(s))
