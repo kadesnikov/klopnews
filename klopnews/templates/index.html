@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block main %}
+{% if user %}
+  <h1>Привет, {{ user.name }}!</h1>
+  <p class="muted">Новый выпуск каждый день в {{ user.delivery_time }}, примерно на {{ user.minutes }} мин. Ссылка придёт в Telegram.</p>
+  {% if episodes %}
+  <ul class="episodes">
+    {% for ep in episodes %}
+    <li><a href="/e/{{ ep.slug }}">
+      <img src="/media/episodes/{{ ep.slug }}.jpg" alt="" loading="lazy">
+      <span><b>{{ date_label(ep.edition) }}</b><br><span class="muted">{{ ep.chapters|length - 1 }} сюжетов · {{ ep.duration|mmss }}</span></span>
+    </a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="card">Выпусков пока нет. Напиши боту <code>/now</code> — соберу первый прямо сейчас.</p>
+  {% endif %}
+{% else %}
+  <section class="hero">
+    <img src="/static/favicon.svg" alt="" width="96" height="96">
+    <h1>Клоп·Новости</h1>
+    <p>Персональный видеовыпуск новостей с ведущим Клопом Александровичем и корреспонденткой Клопиком. Только твои темы и источники.</p>
+    {% if request.query_params.get("expired") %}<p class="warn">Ссылка для входа устарела — попроси у бота новую командой /settings.</p>{% endif %}
+    {% if bot %}<a class="btn" href="https://t.me/{{ bot }}">Открыть бота в Telegram</a>{% endif %}
+  </section>
+{% endif %}
+{% endblock %}

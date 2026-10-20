@@ -1,0 +1,34 @@
+name: klopnews
+
+x-app: &app
+  build: .
+  image: klopnews:latest
+  restart: unless-stopped
+  env_file: .env
+  volumes:
+    - ./data:/data
+    - ./config:/app/config:ro  # источники можно править на сервере без пересборки
+  logging: &log
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+services:
+  web:
+    <<: *app
+    # наружу не торчит: только localhost, снаружи — через Cloudflare Tunnel
+    ports: ["127.0.0.1:${WEB_PORT:-8095}:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      retries: 3
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "klopnews.worker"]
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}"]
+    depends_on: [web]
+    logging: *log

@@ -1,0 +1,53 @@
+# Темы и источники. Правка на сервере: /opt/klopnews/config/sources.yaml, потом `docker compose restart`.
+# Фид не открывается — он просто пропускается с предупреждением в логах.
+
+topics:
+  ai:
+    title: ИИ и технологии
+    color: "#3b82f6"
+  world:
+    title: В мире
+    color: "#ef4444"
+  czech:
+    title: Чехия и Прага
+    color: "#8b5cf6"
+  science:
+    title: Наука и космос
+    color: "#10b981"
+  finance:
+    title: Рынки и деньги
+    color: "#f59e0b"
+
+sources:
+  # ── ИИ и технологии ──
+  - {id: verge, name: The Verge, url: "https://www.theverge.com/rss/index.xml", topics: [ai]}
+  - {id: techcrunch, name: TechCrunch, url: "https://techcrunch.com/category/artificial-intelligence/feed/", topics: [ai]}
+  - {id: ars, name: Ars Technica, url: "https://feeds.arstechnica.com/arstechnica/index", topics: [ai, science]}
+  - {id: habr, name: Хабр, url: "https://habr.com/ru/rss/news/?fl=ru", topics: [ai]}
+  - {id: 3dnews, name: 3DNews, url: "https://3dnews.ru/news/rss/", topics: [ai]}
+  # ── В мире ──
+  - {id: bbcru, name: BBC Русская служба, url: "https://feeds.bbci.co.uk/russian/rss.xml", topics: [world]}
+  - {id: dwru, name: DW, url: "https://rss.dw.com/rdf/rss-ru-all", topics: [world]}
+  - {id: meduza, name: Медуза, url: "https://meduza.io/rss/all", topics: [world]}
+  # ── Чехия и Прага ──
+  - {id: irozhlas, name: iROZHLAS, url: "https://www.irozhlas.cz/rss/irozhlas", topics: [czech]}
+  - {id: ct24, name: ČT24, url: "https://ct24.ceskatelevize.cz/rss/hlavni-zpravy", topics: [czech]}
+  - {id: novinky, name: Novinky.cz, url: "https://www.novinky.cz/rss", topics: [czech]}
+  # ── Наука и космос ──
+  - {id: nplus1, name: N + 1, url: "https://nplus1.ru/rss", topics: [science]}
+  - {id: sciencealert, name: ScienceAlert, url: "https://www.sciencealert.com/feed", topics: [science]}
+  - {id: space, name: Space.com, url: "https://www.space.com/feeds/all", topics: [science]}
+  # ── Рынки и деньги ──
+  - {id: cnbc, name: CNBC Markets, url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", topics: [finance]}
+  - {id: marketwatch, name: MarketWatch, url: "https://feeds.content.dowjones.io/public/rss/mw_topstories", topics: [finance]}
+  - {id: rbc, name: РБК, url: "https://rssexport.rbc.ru/rbcnews/news/30/full.rss", topics: [finance, world]}
+
+# Котировки для блока «Рынки» (Yahoo Finance). Цифры берутся отсюда, модель их только комментирует.
+markets:
+  - {symbol: "^GSPC", name: "S&P 500"}
+  - {symbol: "^IXIC", name: "Nasdaq"}
+  - {symbol: "^GDAXI", name: "DAX"}
+  - {symbol: "GC=F", name: "Золото", unit: "$"}
+  - {symbol: "BZ=F", name: "Нефть Brent", unit: "$"}
+  - {symbol: "BTC-USD", name: "Биткоин", unit: "$"}
+  - {symbol: "EURCZK=X", name: "EUR/CZK", digits: 3}

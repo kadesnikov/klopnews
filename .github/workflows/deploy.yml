@@ -1,0 +1,52 @@
+# Тесты на каждый pull request; после merge в main — тесты и деплой на сервер (как в piano-piano).
+# Секреты репозитория (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY      — приватный ключ деплоя (можно тот же, что у piano-piano)
+#   DEPLOY_KNOWN_HOSTS  — вывод `ssh-keyscan 204.168.241.143`
+# Необязательная переменная (вкладка Variables): DEPLOY_SERVER — по умолчанию root@204.168.241.143
+name: tests-and-deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-inter
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ключ деплоя
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$KNOWN" ]; then
+            echo "::error::Нет секретов DEPLOY_SSH_KEY / DEPLOY_KNOWN_HOSTS — см. README, раздел «Первый запуск»"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+      - name: Деплой
+        env:
+          SERVER: ${{ vars.DEPLOY_SERVER || 'root@204.168.241.143' }}
+        run: ./deploy.sh

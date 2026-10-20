@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Клоп·Новости — {{ date_label(ep.edition) }}{% endblock %}
+{% block head %}
+<meta property="og:title" content="Клоп·Новости — {{ date_label(ep.edition) }}">
+<meta property="og:description" content="{% for c in ep.chapters[1:4] %}{{ c.title }}{% if not loop.last %} · {% endif %}{% endfor %}">
+<meta property="og:image" content="{{ public_url }}/media/episodes/{{ ep.slug }}.jpg">
+<meta property="og:video" content="{{ public_url }}/media/episodes/{{ ep.slug }}.mp4">
+<meta property="og:type" content="video.other">
+{% endblock %}
+{% block main %}
+<h1>Выпуск на {{ date_label(ep.edition) }}</h1>
+<p class="muted">Для: {{ owner.name }} · {{ ep.duration|mmss }}</p>
+<div class="player">
+  <video id="v" controls playsinline preload="metadata" poster="/media/episodes/{{ ep.slug }}.jpg"
+         src="/media/episodes/{{ ep.slug }}.mp4"></video>
+</div>
+<div class="actions">
+  <button class="btn" id="share" type="button">Поделиться</button>
+  <a class="btn ghost" href="/media/episodes/{{ ep.slug }}.mp4" download>Скачать</a>
+</div>
+<ol class="chapters">
+  {% for c in ep.chapters[1:] %}
+  <li>
+    <button type="button" data-t="{{ c.t }}"><span class="time">{{ c.t|mmss }}</span>
+      {% if c.topic %}<span class="dot" style="background: {{ topics[c.topic].color }}"></span>{% endif %}
+      <span class="title">{{ c.title }}{% if c.reporter %} <span class="tag">🎀 включение Клопика</span>{% endif %}</span></button>
+    {% if c.sources %}<div class="sources">{% for src in c.sources %}<a href="{{ src.url }}" target="_blank" rel="noopener">{{ src.name }}</a>{% endfor %}</div>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
+<script>
+  const v = document.getElementById("v");
+  document.querySelectorAll("[data-t]").forEach(b => b.addEventListener("click", () => {
+    v.currentTime = +b.dataset.t; v.play(); v.scrollIntoView({behavior: "smooth", block: "center"});
+  }));
+  document.getElementById("share").addEventListener("click", async (e) => {
+    const data = {title: document.title, url: location.href};
+    try {
+      if (navigator.share) await navigator.share(data);
+      else { await navigator.clipboard.writeText(location.href); e.target.textContent = "Ссылка скопирована"; }
+    } catch (_) {}
+  });
+</script>
+{% endblock %}

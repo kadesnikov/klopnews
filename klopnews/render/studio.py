@@ -1,0 +1,395 @@
+"""Студия «Клоп·Новости»: кадры и клипы.
+
+Видео не рисуется покадрово. Каждые 80 мс берём громкость голоса (рот), моргание, наклон усиков и
+сколько пунктов уже на экране. Уникальных состояний на сюжет — десятки, их и рисуем, а ffmpeg склеивает
+по списку длительностей. Минутный сюжет рендерится за секунды.
+"""
+import hashlib
+import io
+import logging
+import math
+import subprocess
+import tempfile
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+
+import httpx
+import numpy as np
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+
+from klopnews.render import characters
+from klopnews.tts import read_wav, write_wav
+
+log = logging.getLogger(__name__)
+W, H, FPS, STEP = 1280, 720, 25, 0.08
+NAVY, NAVY2, PANEL, INK, MUTED = (11, 21, 48), (18, 32, 70), (15, 26, 58), (255, 255, 255), (160, 174, 205)
+RED, YELLOW, GREEN = (226, 54, 54), (250, 204, 21), (34, 197, 94)
+ENCODE = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-g", "50", "-pix_fmt", "yuv420p", "-r", str(FPS),
+          "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2"]
+FONT_DIRS = ["/usr/share/fonts/opentype/inter", "/usr/share/fonts/truetype/inter", "/usr/share/fonts/truetype/dejavu"]
+
+
+@lru_cache(maxsize=32)
+def font(size: int, weight: str = "Bold") -> ImageFont.FreeTypeFont:
+    names = [f"Inter-{weight}.otf", f"Inter-{weight}.ttf", "DejaVuSans-Bold.ttf" if weight != "Regular" else "DejaVuSans.ttf"]
+    for d in FONT_DIRS:
+        for n in names:
+            if Path(d, n).exists():
+                return ImageFont.truetype(str(Path(d, n)), size)
+    return ImageFont.load_default(size)
+
+
+def hex_rgb(h: str) -> tuple[int, int, int]:
+    return tuple(int(h.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def wrap(text: str, f: ImageFont.FreeTypeFont, width: int, max_lines: int) -> list[str]:
+    lines, cur = [], ""
+    for word in text.split():
+        trial = f"{cur} {word}".strip()
+        if f.getlength(trial) <= width or not cur:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = word
+    lines.append(cur)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        while f.getlength(lines[-1] + "…") > width and " " in lines[-1]:
+            lines[-1] = lines[-1].rsplit(" ", 1)[0]
+        lines[-1] += "…"
+    return lines
+
+
+def ellipsize(text: str, f, width: int) -> str:
+    return wrap(text, f, width, 1)[0]
+
+
+def pill(d: ImageDraw.ImageDraw, x: int, y: int, text: str, bg, size: int = 18, fg=INK) -> int:
+    f = font(size)
+    w = int(f.getlength(text)) + 24
+    d.rounded_rectangle([x, y, x + w, y + size + 14], radius=6, fill=bg)
+    d.text((x + 12, y + 6), text, font=f, fill=fg)
+    return x + w
+
+
+def fetch_image(url: str | None, cache_dir: Path) -> Image.Image | None:
+    if not url:
+        return None
+    path = cache_dir / (hashlib.sha256(url.encode()).hexdigest()[:20] + ".jpg")
+    try:
+        if not path.exists():
+            r = httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            Image.open(io.BytesIO(r.content)).convert("RGB").save(path, quality=90)
+        img = Image.open(path).convert("RGB")
+        return img if img.width >= 200 else None
+    except Exception as e:
+        log.info("image_failed %s: %r", url, e)
+        return None
+
+
+def cover(img: Image.Image, w: int, h: int) -> Image.Image:
+    scale = max(w / img.width, h / img.height)
+    img = img.resize((math.ceil(img.width * scale), math.ceil(img.height * scale)), Image.LANCZOS)
+    x, y = (img.width - w) // 2, (img.height - h) // 2
+    return img.crop((x, y, x + w, y + h))
+
+
+# ── Сцены ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class Scene:
+    """Что показать, пока звучит одна аудиодорожка."""
+    kind: str  # studio | report
+    date_label: str
+    tag: str = ""
+    color: str = "#3b82f6"
+    title: str = ""
+    bullets: list[str] = field(default_factory=list)
+    number: str = ""
+    image: Image.Image | None = None
+    image_credit: str = ""
+    lower: str = ""  # плашка снизу; по умолчанию — заголовок
+    nameplate: tuple[str, str] | None = None  # (имя, подпись) — титр персонажа
+    quotes: list[dict] = field(default_factory=list)  # блок рынков
+    subtitle: str = ""  # крупная вторая строка на карточке (интро/финал)
+    pills: list[tuple[str, str]] = field(default_factory=list)  # [(текст, цвет)] — темы в интро
+
+
+def _background(seed: int) -> Image.Image:
+    y = np.linspace(0, 1, H)[:, None, None]
+    grad = (np.array(NAVY) * (1 - y) + np.array(NAVY2) * y) * np.ones((1, W, 1))
+    img = Image.fromarray(grad.astype("uint8"), "RGB")
+    glow = Image.new("RGB", (W, H), (0, 0, 0))
+    gd, rng = ImageDraw.Draw(glow), np.random.default_rng(seed)
+    for _ in range(14):
+        x, y0, r = rng.integers(0, W), rng.integers(60, 560), rng.integers(20, 70)
+        c = (90, 40, 70) if rng.random() < 0.5 else (40, 60, 120)
+        gd.ellipse([x - r, y0 - r, x + r, y0 + r], fill=c)
+    from PIL import ImageChops
+
+    return ImageChops.add(img, glow.filter(ImageFilter.GaussianBlur(28)))
+
+
+def _logo(d: ImageDraw.ImageDraw, x: int, y: int, size: int = 26):
+    r = size // 2 + 2
+    d.ellipse([x, y, x + 2 * r, y + 2 * r], fill=RED)
+    d.line([x + r, y + 2, x + r, y + 2 * r - 2], fill=(22, 22, 26), width=3)
+    for dx, dy in ((-0.45, -0.1), (0.45, -0.1), (-0.4, 0.45), (0.4, 0.45)):
+        cx, cy = x + r + dx * r, y + r + dy * r
+        d.ellipse([cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5], fill=(22, 22, 26))
+    f = font(size)
+    d.text((x + 2 * r + 12, y + r - size * 0.62), "КЛОП", font=f, fill=INK)
+    d.text((x + 2 * r + 12 + f.getlength("КЛОП"), y + r - size * 0.62), "·НОВОСТИ", font=f, fill=RED)
+
+
+def _chrome(img: Image.Image, sc: Scene, live: str):
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W, 56], fill=(8, 14, 34))
+    d.rectangle([0, 56, W, 58], fill=RED)
+    _logo(d, 24, 13)
+    f = font(18, "SemiBold")
+    tw = f.getlength(sc.date_label)
+    d.text((W - 24 - tw, 18), sc.date_label, font=f, fill=INK)
+    x = W - 40 - tw - int(font(16).getlength(live)) - 40
+    d.rounded_rectangle([x, 15, x + font(16).getlength(live) + 40, 43], radius=6, fill=RED)
+    d.ellipse([x + 11, 25, x + 19, 33], fill=INK)
+    d.text((x + 26, 19), live, font=font(16), fill=INK)
+    # нижняя плашка и полоса
+    lower = sc.lower or sc.title
+    if lower:
+        d.rectangle([24, 606, W - 24, 652], fill=(250, 250, 252))
+        x = pill(d, 24, 606, sc.tag or "НОВОСТИ", hex_rgb(sc.color), 20) if sc.tag else 24
+        d.text((x + 16, 616), ellipsize(lower, font(22, "SemiBold"), W - 60 - x), font=font(22, "SemiBold"), fill=(15, 20, 35))
+    d.rectangle([0, 672, W, H], fill=(8, 14, 34))
+    d.rectangle([0, 672, 210, H], fill=YELLOW)
+    d.text((18, 685), "НОВОСТИ ДНЯ", font=font(20), fill=(15, 20, 35))
+    d.text((232, 687), "Семейный выпуск  •  только проверенные источники  •  ссылки на оригиналы — под видео",
+           font=font(18, "Medium"), fill=MUTED)
+    if sc.nameplate:
+        name, role = sc.nameplate
+        x0, y0 = (40, 528) if sc.kind == "studio" else (40, 520)
+        w = max(font(28).getlength(name), font(16, "Medium").getlength(role)) + 40
+        d.rectangle([x0, y0, x0 + w, y0 + 70], fill=(250, 250, 252))
+        d.rectangle([x0, y0, x0 + 6, y0 + 70], fill=RED)
+        d.text((x0 + 20, y0 + 6), name, font=font(28), fill=(15, 20, 35))
+        d.text((x0 + 20, y0 + 42), role, font=font(16, "Medium"), fill=(90, 98, 120))
+
+
+CARD = (560, 84, W - 40, 572)
+
+
+def _card(img: Image.Image, sc: Scene) -> tuple[int, int, int]:
+    """Рисует карточку без пунктов; возвращает (x, y, ширина) области пунктов."""
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = CARD
+    color = hex_rgb(sc.color)
+    d.rounded_rectangle(CARD, radius=18, fill=PANEL, outline=color, width=3)
+    d.rectangle([x0, y0 + 18, x0 + 6, y1 - 18], fill=color)
+    if sc.number:
+        d.text((x1 - 30 - font(64).getlength(sc.number), y0 + 18), sc.number, font=font(64), fill=(36, 56, 110))
+    y = y0 + 30
+    if sc.tag:
+        pill(d, x0 + 30, y, sc.tag, color, 18)
+        y += 52
+    f = font(40) if not sc.subtitle else font(48)
+    for line in wrap(sc.title, f, x1 - x0 - 60 - (90 if sc.number else 0), 3):
+        d.text((x0 + 30, y), line, font=f, fill=INK)
+        y += f.size + 10
+    if sc.subtitle:
+        d.text((x0 + 30, y + 6), sc.subtitle, font=font(28, "SemiBold"), fill=YELLOW)
+        y += 60
+    if sc.pills:
+        px, py = x0 + 30, y + 20
+        for text, c in sc.pills:
+            w = font(22).getlength(text) + 24
+            if px + w > x1 - 30:
+                px, py = x0 + 30, py + 50
+            pill(d, px, py, text, hex_rgb(c), 22)
+            px += w + 10
+    if sc.quotes:
+        _quotes(d, sc.quotes, x0 + 30, y + 14, x1 - x0 - 60)
+        return x0 + 30, y1, 0
+    bw = x1 - x0 - 60
+    if sc.image is not None:
+        iw, ih = 300, 190
+        thumb = cover(sc.image, iw, ih)
+        img.paste(thumb, (x1 - 30 - iw, y1 - 30 - ih))
+        bw -= iw + 24
+    return x0 + 30, y + 16, bw
+
+
+def _quotes(d, quotes, x, y, w):
+    from klopnews.markets import fmt_change, fmt_price
+
+    f, fs = font(26, "SemiBold"), font(26)
+    for q in quotes[:7]:
+        up = q["change_pct"] >= 0
+        d.text((x, y), q["name"], font=f, fill=INK)
+        price = fmt_price(q)
+        d.text((x + w * 0.55 - f.getlength(price), y), price, font=f, fill=INK)
+        ch = ("▲ " if up else "▼ ") + fmt_change(q)
+        d.text((x + w - fs.getlength(ch), y), ch, font=fs, fill=GREEN if up else RED)
+        y += 48
+
+
+def _bullets_layer(sc: Scene, area: tuple[int, int, int], k: int) -> Image.Image | None:
+    if not k or not area[2]:
+        return None
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    x, y, w = area
+    f = font(24, "Medium")
+    for b in sc.bullets[:k]:
+        lines = wrap(b, f, w - 28, 2)
+        d.rectangle([x, y + 9, x + 10, y + 19], fill=hex_rgb(sc.color))
+        for line in lines:
+            d.text((x + 26, y), line, font=f, fill=INK)
+            y += 32
+        y += 12
+    return layer
+
+
+def _report_base(sc: Scene) -> Image.Image:
+    if sc.image is not None:
+        img = ImageEnhance.Brightness(cover(sc.image, W, H)).enhance(0.78)
+    else:
+        img = _background(7)
+        d = ImageDraw.Draw(img)
+        f = font(96)
+        d.text(((W - f.getlength(sc.title)) / 2 if f.getlength(sc.title) < W - 80 else 40, 240),
+               ellipsize(sc.title, f, W - 80), font=f, fill=(40, 55, 100))
+    img = img.convert("RGB")
+    d = ImageDraw.Draw(img)
+    if sc.image_credit:
+        f = font(15, "Medium")
+        t = f"Фото: {sc.image_credit}"
+        d.rounded_rectangle([W - 36 - f.getlength(t), 70, W - 20, 96], radius=5, fill=(0, 0, 0))
+        d.text((W - 28 - f.getlength(t), 74), t, font=f, fill=(220, 220, 230))
+    return img
+
+
+class Frames:
+    """Рисует кадр по состоянию (рот, моргание, усики, пунктов на экране) с кэшем фона."""
+
+    def __init__(self, sc: Scene):
+        self.sc = sc
+        if sc.kind == "report":
+            self.base, self.area = _report_base(sc), (0, 0, 0)
+            _chrome(self.base, sc, "ПРЯМОЕ ВКЛЮЧЕНИЕ")
+        else:
+            self.base = _background(len(sc.title))
+            self.area = _card(self.base, sc)
+            d = ImageDraw.Draw(self.base)
+            d.rectangle([0, 506, 540, 600], fill=(20, 32, 72))
+            d.rectangle([0, 500, 540, 506], fill=RED)
+            _logo(d, 150, 535, 24)
+            _chrome(self.base, sc, "ЭФИР")
+        self.layers: dict[int, Image.Image | None] = {}
+
+    def render(self, mouth: int, blink: bool, sway: int, k: int) -> Image.Image:
+        img = self.base.copy()
+        if self.sc.kind == "report":
+            sprite = characters.reporter(mouth, blink, sway).resize((506, 540), Image.LANCZOS)
+            img.paste(sprite, (W - 560, 606 - 540), sprite)
+        else:
+            sprite = characters.anchor(mouth, blink, sway).crop((0, 0, 440, 400))
+            img.paste(sprite, (60, 100), sprite)  # низ спрайта спрятан за столом (y=500)
+        if k not in self.layers:
+            self.layers[k] = _bullets_layer(self.sc, self.area, k)
+        if self.layers[k] is not None:
+            img.paste(self.layers[k], (0, 0), self.layers[k])
+        return img
+
+
+# ── Таймлайн и рендер ───────────────────────────────────────────────────────────────
+
+def timeline(samples: np.ndarray, rate: int, n_bullets: int, seed: int = 0) -> list[tuple[tuple, float]]:
+    """[(состояние, длительность)] с шагом STEP; соседние одинаковые состояния склеены."""
+    hop = int(rate * STEP)
+    n = max(1, math.ceil(len(samples) / hop))
+    rms = np.array([np.sqrt(np.mean(samples[i * hop:(i + 1) * hop] ** 2) + 1e-12) for i in range(n)])
+    loud = np.percentile(rms, 95) or 1.0
+    rng = np.random.default_rng(seed)
+    next_blink, out = rng.uniform(1.5, 4), []
+    for i in range(n):
+        t = i * STEP
+        level = rms[i] / loud
+        mouth = 0 if level < 0.18 else (1 if level < 0.5 else 2)
+        blink = next_blink <= t < next_blink + 2 * STEP
+        if t >= next_blink + 2 * STEP:
+            next_blink = t + rng.uniform(2.5, 5.5)
+        sway = round(math.sin(t * 2 * math.pi / 3.2))
+        k = sum(t >= (0.06 + 0.8 * j / max(n_bullets, 1)) * n * STEP for j in range(n_bullets))
+        state = (mouth, blink, sway, k)
+        if out and out[-1][0] == state:
+            out[-1] = (state, out[-1][1] + STEP)
+        else:
+            out.append((state, STEP))
+    return out
+
+
+def render_segment(sc: Scene, wav: Path, out: Path, lead: float = 0.3, tail: float = 0.5,
+                   prefix: np.ndarray | None = None, suffix: np.ndarray | None = None) -> float:
+    """Сцена + дорожка → mp4. prefix/suffix — джингл до и после голоса. Возвращает длительность."""
+    voice, rate = read_wav(wav)
+    parts = [np.zeros(int(rate * lead), np.float32), voice, np.zeros(int(rate * tail), np.float32)]
+    if prefix is not None:
+        parts.insert(0, prefix)
+    if suffix is not None:
+        parts.append(suffix)
+    samples = np.concatenate(parts)
+    frames = Frames(sc)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        write_wav(tmp / "a.wav", samples, rate)
+        names: dict[tuple, str] = {}
+        lines = []
+        for state, dur in timeline(samples, rate, len(sc.bullets), seed=len(sc.title)):
+            if state not in names:
+                names[state] = f"f{len(names)}.png"
+                frames.render(*state).save(tmp / names[state], compress_level=1)
+            lines += [f"file '{names[state]}'", f"duration {dur:.3f}"]
+        lines.append(lines[-2])  # concat-демуксер: последний кадр повторяется без длительности
+        (tmp / "list.txt").write_text("\n".join(lines))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        ffmpeg(["-f", "concat", "-safe", "0", "-i", str(tmp / "list.txt"), "-i", str(tmp / "a.wav"),
+                *ENCODE, "-shortest", str(out)])
+    return len(samples) / rate
+
+
+def concat(clips: list[Path], out: Path) -> float:
+    """Склейка клипов с одинаковыми параметрами без перекодирования."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write("\n".join(f"file '{c.resolve()}'" for c in clips))
+    ffmpeg(["-f", "concat", "-safe", "0", "-i", f.name, "-c", "copy", "-movflags", "+faststart", str(out)])
+    Path(f.name).unlink()
+    return probe_duration(out)
+
+
+def ffmpeg(args: list[str]):
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", *args], capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError(f"ffmpeg failed: {r.stderr[-800:]}")
+
+
+def probe_duration(path: Path) -> float:
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                       capture_output=True, text=True, check=True)
+    return float(r.stdout.strip())
+
+
+def jingle(rate: int, up: bool = True) -> np.ndarray:
+    """Три ноты колокольчика: в начале выпуска вверх, в конце вниз."""
+    notes = [523.25, 659.25, 783.99] if up else [783.99, 659.25, 523.25]
+    out = np.zeros(int(rate * 1.4), np.float32)
+    for i, fq in enumerate(notes):
+        t = np.arange(int(rate * 0.9)) / rate
+        tone = (np.sin(2 * np.pi * fq * t) + 0.3 * np.sin(4 * np.pi * fq * t)) * np.exp(-t * 4) * 0.22
+        s = int(rate * 0.18 * i)
+        out[s:s + len(tone)] += tone[: len(out) - s]
+    return out

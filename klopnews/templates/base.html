@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Клоп·Новости{% endblock %}</title>
+<meta name="theme-color" content="#0b1530">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="top">
+  <a class="logo" href="/"><img src="/static/favicon.svg" alt=""> <span>КЛОП<b>·НОВОСТИ</b></span></a>
+  <nav>{% if user %}<a href="/">Выпуски</a><a href="/settings">Настройки</a>{% elif bot %}<a href="https://t.me/{{ bot }}">Войти через Telegram</a>{% endif %}</nav>
+</header>
+<main>{% block main %}{% endblock %}</main>
+<footer>Семейный проект 🐞 Сюжеты пишет ИИ по материалам источников — ссылки на оригиналы всегда под видео.</footer>
+</body>
+</html>

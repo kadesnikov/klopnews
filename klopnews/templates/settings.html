@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Настройки — Клоп·Новости{% endblock %}
+{% block main %}
+<h1>Настройки</h1>
+{% if saved %}<p class="ok">Сохранено. Следующий выпуск соберётся с новыми настройками — или напиши боту /now.</p>{% endif %}
+<form method="post" class="settings">
+  <label class="field">Как к тебе обращаться
+    <input name="name" value="{{ user.name }}" maxlength="80" required>
+  </label>
+  <div class="row">
+    <label class="field">Длительность выпуска
+      <select name="minutes">{% for m in [5, 7, 10, 15, 20] %}<option value="{{ m }}" {% if m == user.minutes %}selected{% endif %}>{{ m }} мин</option>{% endfor %}</select>
+    </label>
+    <label class="field">Присылать в
+      <input type="time" name="delivery_time" value="{{ user.delivery_time }}" required>
+    </label>
+  </div>
+  <fieldset>
+    <legend>Темы</legend>
+    <p class="muted small">Ничего не выбрано — значит, все.</p>
+    <div class="chips">
+    {% for tid, t in topics.items() %}
+      <label class="chip"><input type="checkbox" name="topics" value="{{ tid }}" {% if not user.topics or tid in user.topics %}checked{% endif %}>
+        <span style="--c: {{ t.color }}">{{ t.title }}</span></label>
+    {% endfor %}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Источники</legend>
+    {% for tid, t in topics.items() %}
+    <div class="group"><div class="small muted">{{ t.title }}</div>
+      <div class="chips">
+      {% for sid, src in sources.items() if src.topics[0] == tid %}
+        <label class="chip"><input type="checkbox" name="sources" value="{{ sid }}" {% if sid not in user.muted_sources %}checked{% endif %}>
+          <span style="--c: {{ t.color }}">{{ src.name }}</span></label>
+      {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </fieldset>
+  <button class="btn" type="submit">Сохранить</button>
+</form>
+<p class="small"><a href="/logout">Выйти</a></p>
+{% endblock %}
