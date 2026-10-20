@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     tts_api_key: str = ""
     tts_model: str = "gpt-4o-mini-tts"  # для elevenlabs: eleven_multilingual_v2
     tts_speed: float = 1.15  # ускорение без смены тона (ffmpeg atempo): модели читают медленнее телеведущих
-    anchor_voice: str = "ash"  # для elevenlabs — voice_id
+    anchor_voice: str = "cedar"  # для elevenlabs — voice_id
     anchor_instructions: str = (
         "Ты — российский телеведущий вечерних новостей, носитель русского языка, родился и вырос в Москве. "
         "Говори по-русски абсолютно без иностранного акцента, с естественными русскими интонациями и ударениями. "
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
         "Только названия компаний и продуктов латиницей (OpenAI, Apple) произноси как принято в русской речи. "
         "О трагедиях — серьёзно и сдержанно."
     )
-    reporter_voice: str = "coral"
+    reporter_voice: str = "marin"
     reporter_instructions: str = (
         "Ты — молодая российская телерепортёрша, носитель русского языка из Москвы, ведёшь прямое включение. "
         "Говори по-русски абсолютно без иностранного акцента, с естественными русскими интонациями. "

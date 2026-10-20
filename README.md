@@ -87,6 +87,6 @@ uvicorn klopnews.web:app --reload
 
 ## Дальше
 
-- Сравнить голоса на одном сюжете: OpenAI (`ash`, `onyx`, `verse`) vs ElevenLabs vs свой Qwen3-TTS-клон.
+- Сравнить голоса на одном сюжете: OpenAI (`cedar`, `marin`, `ash`, `coral`) vs ElevenLabs vs свой Qwen3-TTS-клон.
 - Фоновая подложка под голос, «вжух» между сюжетами.
 - Кнопка «Собрать заново» на сайте после смены настроек.
