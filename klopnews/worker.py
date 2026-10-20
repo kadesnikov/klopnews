@@ -30,7 +30,6 @@ def edition_date(s: Settings) -> str:
 def ensure_edition(db, s: Settings) -> str:
     ed = edition_date(s)
     if (row := db.get(Edition, ed)) is None or row.status != "ready":
-        feeds.fetch_all(catalog()["sources"])
         producer.build_edition(db, s, ed, local_now(s).astimezone(ZoneInfo("UTC")).replace(tzinfo=None))
     return ed
 

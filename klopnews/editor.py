@@ -70,10 +70,27 @@ def recent_items(db, sources: dict, topic: str, since: datetime, limit: int = 60
     return list(db.scalars(q))
 
 
+def blocked_by_filter(e: Exception) -> bool:
+    """Контент-фильтр Moonshot отклоняет запрос целиком, если ему не понравилась одна новость."""
+    return "content_filter" in str(e) or "high risk" in str(e)
+
+
 def select_events(llm, topic_title: str, items: list[Item], sources: dict, yesterday: list[str], n: int) -> list[dict]:
     lines = [f"[{i}] ({sources[it.source_id]['name']}) {it.title} — {it.summary[:200]}" for i, it in enumerate(items)]
     user = ("Вчера уже были: " + ("; ".join(yesterday) or "—") + "\n\nНовости:\n" + "\n".join(lines))
-    events = ask_json(llm, SELECT.format(topic=topic_title, n=n), user).get("events", [])
+    try:
+        events = ask_json(llm, SELECT.format(topic=topic_title, n=n), user).get("events", [])
+    except Exception as e:
+        if not blocked_by_filter(e):
+            raise
+        if len(items) == 1:
+            log.warning("filtered out by model: %s", items[0].title)
+            return []
+        # делим пополам, пока не отсеется новость, которая не нравится фильтру
+        half = len(items) // 2
+        both = (select_events(llm, topic_title, items[:half], sources, yesterday, n)
+                + select_events(llm, topic_title, items[half:], sources, yesterday, n))
+        return sorted(both, key=lambda e: -e["importance"])[:n]
     out = []
     for ev in events:
         picked = [items[i] for i in ev.get("items", []) if isinstance(i, int) and 0 <= i < len(items)]
@@ -126,9 +143,12 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
     """
     sources, since = cat["sources"], now - timedelta(hours=30)
     yday = (datetime.fromisoformat(edition) - timedelta(days=1)).date().isoformat()
+    # новости, по которым уже были сюжеты в прошлые дни, модели второй раз не показываем
+    used = {src["url"] for (srcs,) in db.execute(select(Story.sources).where(Story.edition < edition, Story.edition >= yday))
+            for src in srcs}
     picked: list[tuple[str, dict]] = []
     for topic, meta in cat["topics"].items():
-        items = recent_items(db, sources, topic, since)
+        items = [it for it in recent_items(db, sources, topic, since) if it.url not in used]
         if not items:
             log.warning("no items for topic %s", topic)
             continue

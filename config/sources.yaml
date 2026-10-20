@@ -38,10 +38,9 @@ sources:
   - {id: sciencealert, name: ScienceAlert, url: "https://www.sciencealert.com/feed", topics: [science]}
   - {id: space, name: Space.com, url: "https://www.space.com/feeds.xml", topics: [science]}
   # ── Рынки и деньги ──
-  - {id: yahoofin, name: Yahoo Finance, url: "https://finance.yahoo.com/news/rssindex", topics: [finance]}
   - {id: bloomberg, name: Bloomberg Markets, url: "https://feeds.bloomberg.com/markets/news.rss", topics: [finance]}
   - {id: marketwatch, name: MarketWatch, url: "https://feeds.content.dowjones.io/public/rss/mw_topstories", topics: [finance]}
-  # CNBC (403 для серверов) и РБК (не отвечает из Хельсинки) убраны
+  # CNBC (403 для серверов), РБК (не отвечает из Хельсинки), Yahoo Finance (RSS закрыт) убраны
 
 # Котировки для блока «Рынки» (Yahoo Finance). Цифры берутся отсюда, модель их только комментирует.
 markets:

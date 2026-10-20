@@ -66,3 +66,21 @@ def test_rebuild_resumes_without_duplicates(monkeypatch):
         first = db.query(Story).count()
         producer.build_edition(db, s, "2026-10-20", utcnow())  # как после перезапуска воркера
         assert db.query(Story).count() == first == 3
+
+
+def test_next_day_skips_items_already_used(monkeypatch):
+    monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
+    monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [])
+    monkeypatch.setattr("klopnews.render.studio.render_segment", lambda *a, **k: 1.0)
+    s = settings()
+    with session() as db:
+        db.add(Item(source_id="verge", url="https://ex.com/old", title="Вчерашняя", summary="",
+                    published_at=utcnow() - timedelta(hours=20)))
+        db.commit()
+        producer.build_edition(db, s, "2026-10-19", utcnow())
+        db.add(Item(source_id="verge", url="https://ex.com/new", title="Сегодняшняя", summary="",
+                    published_at=utcnow() - timedelta(hours=1)))
+        db.commit()
+        producer.build_edition(db, s, "2026-10-20", utcnow())
+        today = db.query(Story).filter(Story.edition == "2026-10-20").all()
+        assert [st.sources[0]["url"] for st in today] == ["https://ex.com/new"]
