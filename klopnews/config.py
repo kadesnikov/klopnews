@@ -93,7 +93,7 @@ def settings() -> Settings:
 
 @lru_cache
 def catalog(path: Path | None = None) -> dict:
-    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...], 'movers': [...], 'events': {city, pages, searches}}"""
+    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...], 'movers': [...], 'events': {city, pages, searches}, 'weather': {city, lat, lon}}"""
     raw = yaml.safe_load((path or settings().sources_file).read_text(encoding="utf-8"))
     return {
         "topics": raw["topics"],
@@ -101,4 +101,5 @@ def catalog(path: Path | None = None) -> dict:
         "markets": raw.get("markets", []),
         "movers": raw.get("movers", []),
         "events": raw.get("events") or {},
+        "weather": raw.get("weather") or {},
     }

@@ -31,7 +31,7 @@
   </fieldset>
   <fieldset>
     <legend>Источники</legend>
-    {% for tid, t in topics.items() %}
+    {% for tid, t in topics.items() if sources.values() | selectattr("topics.0", "equalto", tid) | list %}
     <div class="group"><div class="small muted">{{ t.title }}</div>
       <div class="chips">
       {% for sid, src in sources.items() if src.topics[0] == tid %}

@@ -36,3 +36,18 @@ def test_holidays():
     assert theme_for(date(2026, 10, 21)) is None
     assert is_birthday("2000-02-29", date(2027, 2, 28)) and not is_birthday("2000-02-29", date(2028, 2, 28))
     assert not is_birthday(None, date(2026, 1, 1))
+
+
+def test_weather_gear_and_summary():
+    from klopnews import weather
+
+    rain = {"tmin": 7, "tmax": 12, "code": 63, "rain_prob": 85, "rain_mm": 6.0, "wind": 6}
+    assert weather.gear(rain) == "umbrella"
+    assert weather.summary(rain) == "+7°…+12°, дождь, осадки 85%, ветер до 6 м/с"
+    assert weather.gear({**rain, "code": 0, "rain_prob": 0, "rain_mm": 0, "tmax": 24}) == "sunglasses"
+    assert weather.gear({**rain, "code": 0, "rain_prob": 0, "rain_mm": 0, "tmin": -8, "tmax": -2}) == "winter"
+    assert weather.gear({**rain, "code": 73, "tmin": -6, "tmax": -1}) == "winter"
+    assert weather.parse({"daily": {"weather_code": [3], "temperature_2m_max": [14.6], "temperature_2m_min": [6.2],
+                                    "precipitation_probability_max": [None], "precipitation_sum": [0.0],
+                                    "wind_speed_10m_max": [18.0]}}) == \
+        {"tmin": 6, "tmax": 15, "code": 3, "rain_prob": 0, "rain_mm": 0.0, "wind": 5}

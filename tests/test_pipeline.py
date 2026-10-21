@@ -12,6 +12,8 @@ from klopnews.render import studio
 
 def test_full_pipeline(monkeypatch):
     monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
+    monkeypatch.setattr("klopnews.weather.fetch", lambda cfg: {"tmin": 7, "tmax": 12, "code": 63, "rain_prob": 85,
+                                                               "rain_mm": 6.0, "wind": 6})
     monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [
         {"name": "Nebius", "symbol": "NBIS", "group": "неоклауды", "price": 90.0, "change_pct": -7.5}]
         if ins and "group" in ins[0] else [
@@ -28,9 +30,9 @@ def test_full_pipeline(monkeypatch):
 
         producer.build_edition(db, s, "2026-10-20", utcnow())
         stories = db.query(Story).all()
-        assert {st.kind for st in stories} == {"story", "markets"}
+        assert {st.kind for st in stories} == {"story", "markets", "weather"}
         assert all(st.status == "ready" and st.duration > 1 for st in stories)
-        assert sum(bool(st.reporter_script) for st in stories) == 2
+        assert sum(bool(st.reporter_script) for st in stories if st.kind == "story") == 2
 
         ep = producer.assemble(db, s, user, "2026-10-20")
         video = s.media_dir / "episodes" / f"{ep.slug}.mp4"

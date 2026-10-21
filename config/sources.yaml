@@ -2,6 +2,9 @@
 # Фид не открывается — он просто пропускается с предупреждением в логах.
 
 topics:
+  weather:
+    title: Погода
+    color: "#38bdf8"
   ai:
     title: ИИ и технологии
     color: "#3b82f6"
@@ -101,3 +104,11 @@ events:
     - site:goout.net umělá inteligence Praha
     - hackathon AI Prague
     - Machine Learning Prague conference
+
+# Погода в начале выпуска — у кого включена тема «Погода». Прогноз Open-Meteo (без ключа), рассказывает Клопик,
+# одетая по погоде: зонтик, шапка с варежками, тёмные очки.
+weather:
+  city: Прага
+  lat: 50.08
+  lon: 14.42
+  timezone: Europe/Prague

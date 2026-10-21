@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from klopnews import events, feeds, markets
+from klopnews import events, feeds, markets, weather
 from klopnews.db import Event, Item, Story
 from klopnews.llm import ask_json
 
@@ -77,6 +77,32 @@ AFISHA = PERSONA + "\n\n" + RULES + """
 назови с днём и местом, остальные — одной фразой. Скажи, кому что подойдёт, если это понятно из описания.
 Можно одну фразу мнения Клопа. Время и адреса не диктуй целиком — ссылки на всё будут под видео.
 Формат: {"afisha": true, "script": "текст для ведущего"}"""
+
+
+WEATHER = PERSONA + "\n\n" + RULES + """
+
+Клопик ведёт прогноз погоды в начале выпуска: 30–45 слов от её лица, живо и по-дружески.
+Цифры — только из прогноза ниже. Дай практичный совет на день (зонт, тёплая шапка, тёмные очки, лёгкая куртка)
+и одной фразой скажи, во что она сама сегодня одета (наряд указан ниже). В конце передай слово в студию
+Клопу Александровичу.
+Формат: {"weather": true, "script": "текст Клопика"}"""
+
+OUTFIT = {"umbrella": "с зонтиком", "winter": "в шапке и варежках", "sunglasses": "в тёмных очках"}
+
+
+def write_weather(llm, w: dict, city: str, edition: str) -> Story:
+    """Прогноз от Клопика. Модель не ответила — говорит шаблон: погода важнее красоты слога."""
+    outfit = ", ".join(OUTFIT[g] for g in weather.gear(w).split("+") if g) or "как обычно, с бантиком"
+    line = weather.summary(w)
+    try:
+        script = str(ask_json(llm, WEATHER, f"{city}, сегодня: {line}. Наряд Клопика: {outfit}.")["script"])
+    except Exception as e:
+        log.error("weather_text_failed: %r", e)
+        script = (f"Погода в городе {city} на сегодня: {line.replace('…', ' до ').replace('°', ' градусов')}. "
+                  f"Я сегодня {outfit}. Клоп Александрович, передаю слово в студию!")
+    return Story(edition=edition, topic="weather", kind="weather", importance=7, headline=f"Погода: {city}, {line}",
+                 tag="ПОГОДА", script="", reporter_script=script, place=city, sources=[],
+                 data={"weather": w, "city": city})
 
 
 def recent_items(db, sources: dict, topic: str, since: datetime, limit: int = 60) -> list[Item]:
@@ -190,6 +216,8 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
     # что уже взято в выпуск, следующим темам не показываем и называем модели, чтобы не взяла его из другого источника
     taken = list(db.scalars(select(Story.headline).where(Story.edition == edition)))
     for topic, meta in cat["topics"].items():
+        if not any(topic in src["topics"] for src in sources.values()):
+            continue  # у темы нет лент (погода) — её сюжет пишется отдельно
         items = [it for it in recent_items(db, sources, topic, since) if it.url not in used]
         if not items:
             log.warning("no items for topic %s", topic)
