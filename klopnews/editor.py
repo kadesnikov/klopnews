@@ -57,10 +57,12 @@ REPORTER_NOTE = " Этот сюжет идёт с прямым включени�
 
 MARKETS = PERSONA + "\n\n" + RULES + """
 
-Сделай блок «Рынки» на 40–60 секунд (80–120 слов) по котировкам и финансовым новостям ниже.
-Цифры — только из таблицы котировок, проценты округляй до десятых. Обязательно скажи, как вели себя фондовые индексы
-и сколько стоят евро и доллар в кронах. Объясни простыми словами, что двигало рынки, если это есть в новостях.
-Никаких инвестиционных советов.
+Сделай короткий блок «Рынки» на 25–35 секунд (55–80 слов) по котировкам и новостям ниже — быстро, только главное:
+1. Фондовые индексы одной фразой.
+2. Самые заметные движения акций: называй сектор целиком, если акции движутся вместе («неоклауды Nebius и IREN
+   падают…», «гиперскейлеры растут…»), и причину, если она есть в новостях. Нет причины — не придумывай.
+3. Курс евро и доллара в кронах одной фразой.
+Цифры — только из таблиц, проценты округляй до десятых. Никаких инвестиционных советов.
 Формат: {"markets": true, "script": "текст для ведущего", "bullets": ["2–3 пункта для экрана"]}"""
 
 
@@ -129,15 +131,17 @@ def write_story(llm, ev: dict, topic: str, sources: dict, edition: str, reporter
     )
 
 
-def write_markets(llm, quotes: list[dict], items: list[Item], edition: str) -> Story | None:
+def write_markets(llm, quotes: list[dict], stocks: list[dict], items: list[Item], edition: str) -> Story | None:
     if not quotes:
         return None
     table = "\n".join(f"{q['name']}: {markets.fmt_price(q)} ({markets.fmt_change(q)} за день)" for q in quotes)
-    news = "\n".join(f"- {it.title} — {it.summary[:200]}" for it in items[:15]) or "—"
-    d = ask_json(llm, MARKETS, f"Котировки:\n{table}\n\nФинансовые новости:\n{news}")
+    shares = "\n".join(f"{q['name']} ({q['symbol']}, {q['group']}): {markets.fmt_change(q)}"
+                       for q in sorted(stocks, key=lambda q: q["change_pct"])) or "—"
+    news = "\n".join(f"- {it.title} — {it.summary[:200]}" for it in items[:25]) or "—"
+    d = ask_json(llm, MARKETS, f"Котировки:\n{table}\n\nАкции (за день):\n{shares}\n\nНовости рынков и технологий:\n{news}")
     return Story(edition=edition, topic="finance", kind="markets", importance=7, headline="Рынки за день",
                  tag="РЫНКИ", bullets=[str(b)[:80] for b in d.get("bullets", [])][:3], script=str(d["script"]),
-                 sources=[], data={"quotes": quotes})
+                 sources=[], data={"quotes": quotes, "movers": markets.top_movers(stocks)})
 
 
 def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enabled: bool = True,
@@ -187,7 +191,9 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
 
     if "finance" in cat["topics"] and cat["markets"] and not markets_done:
         try:
-            st = write_markets(llm, markets.fetch_quotes(cat["markets"]), recent_items(db, sources, "finance", since), edition)
+            news = recent_items(db, sources, "finance", since) + recent_items(db, sources, "ai", since, 10)
+            st = write_markets(llm, markets.fetch_quotes(cat["markets"]), markets.fetch_quotes(cat.get("movers", [])),
+                               news, edition)
             if st:
                 yield st
         except Exception as e:

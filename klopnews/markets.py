@@ -34,6 +34,11 @@ def fetch_quotes(instruments: list[dict]) -> list[dict]:
     return out
 
 
+def top_movers(quotes: list[dict], n: int = 6) -> list[dict]:
+    """Самые сильные движения дня по модулю."""
+    return sorted(quotes, key=lambda q: -abs(q["change_pct"]))[:n]
+
+
 def fmt_price(q: dict) -> str:
     digits = q.get("digits", 2 if q["price"] < 10_000 else 0)
     s = f"{q['price']:,.{digits}f}".replace(",", " ").replace(".", ",")

@@ -1,3 +1,5 @@
+from datetime import date
+
 from klopnews.db import Story, User
 from klopnews.producer import intro_script, pick_stories
 
@@ -11,8 +13,12 @@ def test_pick_respects_topics_muted_sources_and_budget():
     stories = [st("ai", 9, 60), st("ai", 3, 20, "brief"), st("world", 8, 60, src="muted"),
                st("finance", 7, 50, "markets"), st("science", 6, 60), st("ai", 7, 60)]
     user = User(name="Маша", topics=["ai", "finance", "world"], muted_sources=["muted"], delivery_time="07:30")
+    picked = pick_stories(user, stories, budget=160)
+    assert [p.headline for p in picked] == ["ai9", "ai7", "finance7"]  # 170 с: перебор в 20% можно, ai3 уже лишний
     picked = pick_stories(user, stories, budget=175)
-    assert [p.headline for p in picked] == ["ai9", "ai7", "finance7"]  # ai3 не влез, world — заглушён
+    assert [p.headline for p in picked] == ["ai9", "ai7", "finance7", "ai3"]  # world — заглушён
+    picked = pick_stories(User(name="Петя", topics=["ai"], muted_sources=[]), stories, budget=1000)
+    assert "markets" in [p.kind for p in picked]  # рынки — всем, даже без темы «Рынки и деньги»
     picked = pick_stories(user, stories, budget=1000)
     assert [p.kind for p in picked] == ["story", "story", "markets", "brief"]
 
@@ -25,8 +31,14 @@ def test_all_topics_when_empty_and_skip_failed():
 
 def test_intro_greets_by_time():
     u = User(name="Маша", delivery_time="19:00")
-    text = intro_script(u, [st("ai", 9, 60), st("ai", 8, 60)])
-    assert text.startswith("Добрый вечер, Маша!") and "ai9 и ai8" in text
+    text = intro_script(u, [st("ai", 9, 60), st("ai", 8, 60)], date(2026, 10, 21))
+    assert text.startswith("Добрый вечер, Маша!") and "ai9 и ai8" in text and "рождения" not in text
+
+
+def test_intro_birthday_and_holiday():
+    u = User(name="Маша", delivery_time="07:30", birthday="1990-10-31")
+    text = intro_script(u, [st("ai", 9, 60)], date(2026, 10, 31))
+    assert "Маша, с днём рождения!" in text and "Хеллоуин" in text
 
 
 def test_same_event_twice_is_shown_once():

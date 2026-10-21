@@ -19,6 +19,7 @@ import httpx
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
+from klopnews.markets import fmt_change, fmt_price
 from klopnews.render import characters
 from klopnews.tts import loudnorm, read_wav, write_wav
 
@@ -148,9 +149,53 @@ class Scene:
     subtitle: str = ""  # крупная вторая строка на карточке (интро/финал)
     pills: list[tuple[str, str]] = field(default_factory=list)  # [(текст, цвет)] — темы в интро
     ticker: str = ""  # бегущая строка внизу: главные заголовки дня
+    theme: object = None  # holidays.Theme: костюмы, украшения и плашка праздника
+    movers: list[dict] = field(default_factory=list)  # акции дня рядом с котировками
 
 
-def _background(seed: int) -> Image.Image:
+def _decor(img: Image.Image, kind: str, palette: tuple, seed: int) -> Image.Image:
+    """Праздничные украшения поверх фона студии: полупрозрачные, чтобы не спорить с текстом."""
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d, rng = ImageDraw.Draw(layer), np.random.default_rng(seed)
+    for _ in range(46):
+        x, y, s = int(rng.integers(0, W)), int(rng.integers(60, 600)), int(rng.integers(8, 22))
+        c = palette[int(rng.integers(len(palette)))] + (int(rng.integers(110, 200)),)
+        if kind == "snow":
+            d.ellipse([x - s / 3, y - s / 3, x + s / 3, y + s / 3], fill=c)
+        elif kind == "hearts":
+            d.ellipse([x - s, y - s, x, y], fill=c)
+            d.ellipse([x, y - s, x + s, y], fill=c)
+            d.polygon([(x - s, y - s / 2), (x + s, y - s / 2), (x, y + s)], fill=c)
+        elif kind == "confetti":
+            a = rng.uniform(0, math.pi)
+            dx, dy, ex, ey = math.cos(a) * s / 2, math.sin(a) * s / 2, -math.sin(a) * s / 5, math.cos(a) * s / 5
+            d.polygon([(x - dx - ex, y - dy - ey), (x + dx - ex, y + dy - ey), (x + dx + ex, y + dy + ey),
+                       (x - dx + ex, y - dy + ey)], fill=c)
+        elif kind == "stars":
+            pts = [(x + math.cos(math.pi / 2 + k * math.pi / 5) * (s if k % 2 == 0 else s / 2.4),
+                    y - math.sin(math.pi / 2 + k * math.pi / 5) * (s if k % 2 == 0 else s / 2.4)) for k in range(10)]
+            d.polygon(pts, fill=c)
+        elif kind == "eggs":
+            d.ellipse([x - s * 0.7, y - s, x + s * 0.7, y + s], fill=c)
+            d.line([x - s * 0.6, y, x + s * 0.6, y], fill=(255, 255, 255, 160), width=3)
+        elif kind == "flowers":
+            for k in range(5):
+                a = k * 2 * math.pi / 5
+                cx, cy = x + math.cos(a) * s / 2, y + math.sin(a) * s / 2
+                d.ellipse([cx - s / 2.5, cy - s / 2.5, cx + s / 2.5, cy + s / 2.5], fill=c)
+            d.ellipse([x - s / 4, y - s / 4, x + s / 4, y + s / 4], fill=(250, 204, 21, c[3]))
+        elif kind == "bats":
+            if rng.random() < 0.3:  # тыква
+                d.ellipse([x - s * 1.3, y - s, x + s * 1.3, y + s], fill=(249, 115, 22, 210))
+                d.rectangle([x - 2, y - s - 6, x + 2, y - s + 2], fill=(34, 120, 60, 210))
+            else:  # летучая мышь
+                d.polygon([(x - s * 1.6, y - s / 2), (x - s * 0.8, y), (x - s * 0.4, y - s / 3), (x, y + s / 3),
+                           (x + s * 0.4, y - s / 3), (x + s * 0.8, y), (x + s * 1.6, y - s / 2), (x, y - s / 6)],
+                          fill=(5, 5, 12, 200))
+    return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+
+
+def _background(seed: int, theme=None) -> Image.Image:
     y = np.linspace(0, 1, H)[:, None, None]
     grad = (np.array(NAVY) * (1 - y) + np.array(NAVY2) * y) * np.ones((1, W, 1))
     img = Image.fromarray(grad.astype("uint8"), "RGB")
@@ -162,7 +207,8 @@ def _background(seed: int) -> Image.Image:
         gd.ellipse([x - r, y0 - r, x + r, y0 + r], fill=c)
     from PIL import ImageChops
 
-    return ImageChops.add(img, glow.filter(ImageFilter.GaussianBlur(28)))
+    img = ImageChops.add(img, glow.filter(ImageFilter.GaussianBlur(28)))
+    return _decor(img, theme.decor, theme.palette, seed) if theme and theme.decor else img
 
 
 def _logo(d: ImageDraw.ImageDraw, x: int, y: int, size: int = 26):
@@ -182,6 +228,8 @@ def _chrome(img: Image.Image, sc: Scene, live: str):
     d.rectangle([0, 0, W, 56], fill=(8, 14, 34))
     d.rectangle([0, 56, W, 58], fill=RED)
     _logo(d, 24, 13)
+    if sc.theme:
+        pill(d, 300, 15, sc.theme.title, hex_rgb(sc.theme.accent), 15)
     f = font(18, "SemiBold")
     tw = f.getlength(sc.date_label)
     d.text((W - 24 - tw, 18), sc.date_label, font=f, fill=INK)
@@ -269,7 +317,11 @@ def _card(img: Image.Image, sc: Scene) -> tuple[int, int, int]:
             pill(d, px, py, text, hex_rgb(c), 22)
             px += w + 10
     if sc.quotes:
-        _quotes(d, sc.quotes, x0 + 30, y + 14, x1 - x0 - 60)
+        w = x1 - x0 - 60
+        if sc.movers:
+            _movers(d, sc.movers, x1 - 30 - 220, y + 14, 220)
+            w -= 220 + 30
+        _quotes(d, sc.quotes, x0 + 30, y + 14, w)
         return x0 + 30, y1, 0
     bw = x1 - x0 - 60
     if sc.image is not None:
@@ -281,11 +333,11 @@ def _card(img: Image.Image, sc: Scene) -> tuple[int, int, int]:
 
 
 def _quotes(d, quotes, x, y, w):
-    from klopnews.markets import fmt_change, fmt_price
 
     quotes = quotes[:12]
     row = min(48, (CARD[3] - 24 - y) // max(len(quotes), 1))  # сколько бы инструментов ни было — влезают
-    f, fs = font(row * 26 // 48, "SemiBold"), font(row * 26 // 48)
+    size = min(row * 26 // 48, MOVERS_FONT if w < 500 else 26)
+    f, fs = font(size, "SemiBold"), font(size)
     for q in quotes:
         up = q["change_pct"] >= 0
         d.text((x, y), q["name"], font=f, fill=INK)
@@ -294,6 +346,22 @@ def _quotes(d, quotes, x, y, w):
         ch = ("▲ " if up else "▼ ") + fmt_change(q)
         d.text((x + w - fs.getlength(ch), y), ch, font=fs, fill=GREEN if up else RED)
         y += row
+
+
+MOVERS_FONT = 19
+
+
+def _movers(d, movers, x, y, w):
+    """Колонка «Акции дня»: самые сильные движения из списка наблюдения."""
+    d.text((x, y), "АКЦИИ ДНЯ", font=font(16), fill=MUTED)
+    y += 30
+    f = font(MOVERS_FONT, "SemiBold")
+    for q in movers:
+        up = q["change_pct"] >= 0
+        ch = ("▲ " if up else "▼ ") + fmt_change(q)
+        d.text((x, y), ellipsize(q["name"], f, w - f.getlength(ch) - 10), font=f, fill=INK)
+        d.text((x + w - f.getlength(ch), y), ch, font=f, fill=GREEN if up else RED)
+        y += 38
 
 
 def fit_bullets(bullets: list[str], area: tuple[int, int, int], bottom: int) -> tuple[ImageFont.FreeTypeFont, list[list[str]]]:
@@ -376,7 +444,7 @@ class Frames:
             self.base, self.area, self.fitted = _report_base(sc), (0, 0, 0), (None, [])
             _chrome(self.base, sc, "ПРЯМОЕ ВКЛЮЧЕНИЕ")
         else:
-            self.base = _background(len(sc.title))
+            self.base = _background(len(sc.title), sc.theme)
             self.area = _card(self.base, sc)
             self.fitted = fit_bullets(sc.bullets, self.area, CARD[3] - 24) if self.area[2] else (None, [])
             d = ImageDraw.Draw(self.base)
@@ -388,11 +456,12 @@ class Frames:
 
     def render(self, mouth: int, blink: bool, sway: int, k: int) -> Image.Image:
         img = self.base.copy()
+        dress = self.sc.theme.costume if self.sc.theme else ""
         if self.sc.kind == "report":
-            sprite = characters.reporter(mouth, blink, sway).resize((506, 540), Image.LANCZOS)
+            sprite = characters.reporter(mouth, blink, sway, dress).resize((506, 540), Image.LANCZOS)
             img.paste(sprite, (W - 560, 606 - 540), sprite)
         else:
-            sprite = characters.anchor(mouth, blink, sway).crop((0, 0, 440, 400))
+            sprite = characters.anchor(mouth, blink, sway, dress).crop((0, 0, 440, 400))
             img.paste(sprite, (60, 100), sprite)  # низ спрайта спрятан за столом (y=500)
         if k not in self.layers:
             self.layers[k] = _bullets_layer(self.sc, self.area, self.fitted, k)

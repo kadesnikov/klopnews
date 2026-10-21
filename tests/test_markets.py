@@ -22,3 +22,17 @@ def test_bigger_image_url():
         "https://ichef.bbci.co.uk/ace/ws/1024/cpsprodpb/a/b.jpg"
     assert bigger_image_url("https://x.com/wp/photo-300x200.jpg") == "https://x.com/wp/photo.jpg"
     assert bigger_image_url("https://x.com/a.jpg") == "https://x.com/a.jpg"
+
+
+def test_holidays():
+    from datetime import date
+
+    from klopnews.holidays import easter, is_birthday, orthodox_easter, theme_for
+
+    assert easter(2026) == date(2026, 4, 5) and orthodox_easter(2026) == date(2026, 4, 12)
+    assert theme_for(date(2026, 10, 31)).costume == "witch"
+    assert theme_for(date(2026, 4, 6)).id == "easter"  # пасхальный понедельник в Чехии
+    assert theme_for(date(2026, 5, 9)).costume == ""  # день памяти — без костюмов
+    assert theme_for(date(2026, 10, 21)) is None
+    assert is_birthday("2000-02-29", date(2027, 2, 28)) and not is_birthday("2000-02-29", date(2028, 2, 28))
+    assert not is_birthday(None, date(2026, 1, 1))

@@ -54,3 +54,25 @@ markets:
   - {symbol: "CZK=X", name: "Доллар в кронах", digits: 2}
   - {symbol: "EURUSD=X", name: "EUR/USD", digits: 4}
   - {symbol: "RUB=X", name: "Доллар в рублях", digits: 2}
+
+# Акции, за которыми следим: в выпуск попадают самые сильные движения дня, модель объясняет их по новостям.
+# group — как назвать сектор в эфире («неоклауды падают на фоне…»).
+movers:
+  - {symbol: NBIS, name: Nebius, group: неоклауды}
+  - {symbol: IREN, name: IREN, group: неоклауды}
+  - {symbol: CRWV, name: CoreWeave, group: неоклауды}
+  - {symbol: APLD, name: Applied Digital, group: неоклауды}
+  - {symbol: CIFR, name: Cipher Mining, group: неоклауды}
+  - {symbol: WULF, name: TeraWulf, group: неоклауды}
+  - {symbol: MSFT, name: Microsoft, group: гиперскейлеры}
+  - {symbol: AMZN, name: Amazon, group: гиперскейлеры}
+  - {symbol: GOOGL, name: Alphabet, group: гиперскейлеры}
+  - {symbol: META, name: Meta, group: гиперскейлеры}
+  - {symbol: ORCL, name: Oracle, group: гиперскейлеры}
+  - {symbol: NVDA, name: Nvidia, group: чипы}
+  - {symbol: AMD, name: AMD, group: чипы}
+  - {symbol: AVGO, name: Broadcom, group: чипы}
+  - {symbol: TSM, name: TSMC, group: чипы}
+  - {symbol: AAPL, name: Apple, group: бигтех}
+  - {symbol: TSLA, name: Tesla, group: бигтех}
+  - {symbol: PLTR, name: Palantir, group: бигтех}

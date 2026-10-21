@@ -13,6 +13,8 @@ from klopnews.render import studio
 def test_full_pipeline(monkeypatch):
     monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
     monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [
+        {"name": "Nebius", "symbol": "NBIS", "group": "неоклауды", "price": 90.0, "change_pct": -7.5}]
+        if ins and "group" in ins[0] else [
         {"name": "S&P 500", "price": 6000.0, "change_pct": 0.4}, {"name": "Золото", "unit": "$", "price": 2788.0, "change_pct": -1.2}])
     s = settings()
     with session() as db:

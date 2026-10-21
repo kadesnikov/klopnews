@@ -8,16 +8,20 @@
     <input name="name" value="{{ user.name }}" maxlength="80" required>
   </label>
   <div class="row">
-    <label class="field">Длительность выпуска
+    <label class="field">Длительность выпуска, примерно
       <select name="minutes">{% for m in [5, 7, 10, 15, 20] %}<option value="{{ m }}" {% if m == user.minutes %}selected{% endif %}>{{ m }} мин</option>{% endfor %}</select>
     </label>
     <label class="field">Присылать в
       <input type="time" name="delivery_time" value="{{ user.delivery_time }}" required>
     </label>
   </div>
+  <label class="field">День рождения
+    <input type="date" name="birthday" value="{{ user.birthday or '' }}">
+    <span class="muted small">Клоп поздравит в начале выпуска. Год никто не узнает — возраст не называем.</span>
+  </label>
   <fieldset>
     <legend>Темы</legend>
-    <p class="muted small">Ничего не выбрано — значит, все.</p>
+    <p class="muted small">Ничего не выбрано — значит, все. Короткая сводка рынков и курсов валют есть в каждом выпуске.</p>
     <div class="chips">
     {% for tid, t in topics.items() %}
       <label class="chip"><input type="checkbox" name="topics" value="{{ tid }}" {% if not user.topics or tid in user.topics %}checked{% endif %}>

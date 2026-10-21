@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from klopnews import editor
+from klopnews import editor, holidays
 from klopnews.config import Settings, catalog
 from klopnews.db import Edition, Episode, Story, User
 from klopnews.llm import make_llm
@@ -43,9 +43,11 @@ def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
     image = studio.fetch_image(st.image_url, s.media_dir / "img")
     base = s.media_dir / "clips" / st.edition
     label = date_label(st.edition)
+    theme = holidays.theme_for(date.fromisoformat(st.edition))
     scene = studio.Scene(kind="studio", date_label=label, tag=st.tag or cat["topics"][st.topic]["title"].upper(),
                          color=color, title=st.headline, bullets=st.bullets, image=image,
-                         quotes=st.data.get("quotes", []), ticker=ticker, credit=credit_text(st))
+                         quotes=st.data.get("quotes", []), movers=st.data.get("movers", []), ticker=ticker,
+                         credit=credit_text(st), theme=theme)
     if st.kind == "brief":
         scene.lower = f"Коротко: {st.headline}"
     out = base / f"{st.id}.mp4"
@@ -58,7 +60,7 @@ def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
                               color="#ff5fa2", title=st.place or st.headline, image=image,
                               image_credit=st.sources[0]["name"] if image and st.sources else "",
                               lower=st.headline, nameplate=("Клопик", f"корреспондент · {st.place or 'на месте событий'}"),
-                              ticker=ticker)
+                              ticker=ticker, theme=theme)
         studio.render_segment(report, synthesize(st.reporter_script, s.reporter_voice, s.reporter_instructions, s), b)
         st.duration = studio.concat([a, b], out)
         a.unlink()
@@ -142,21 +144,22 @@ def _key_words(headline: str) -> set[str]:
 
 
 def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]:
-    """Сюжеты под настройки человека, по важности, пока влезают в его длительность.
+    """Сюжеты под настройки человека, по важности, примерно на его длительность.
 
-    Рынки (индексы и курсы валют) берутся всегда, если выбрана тема «Рынки и деньги»: иначе важные сюжеты
-    выедают весь бюджет раньше них. Порядок в выпуске: главные сюжеты, рынки, потом «коротко».
+    Длительность — ориентир, а не потолок: сюжет, который начинается до конца бюджета, берём, если выпуск выйдет
+    длиннее не больше чем на 20%. Мало новостей — выпуск честно короче.
+    Короткий блок «Рынки» (индексы, акции дня, курсы) — всем и всегда, независимо от тем.
+    Порядок в выпуске: главные сюжеты, рынки, потом «коротко».
     """
     muted = set(user.muted_sources or [])
-    ok = [st for st in stories if st.status == "ready"
-          and (not user.topics or st.topic in user.topics)
-          and (st.kind == "markets" or any(src["id"] not in muted for src in st.sources))]
+    ok = [st for st in stories if st.status == "ready" and (st.kind == "markets" or (
+        (not user.topics or st.topic in user.topics) and any(src["id"] not in muted for src in st.sources)))]
     chosen, used, seen, urls = [], 0.0, [], set()
     for st in sorted(ok, key=lambda x: (x.kind != "markets", -x.importance)):
         keys, own = _key_words(st.headline), {src["url"] for src in st.sources}
         if any(len(keys & k) >= 2 for k in seen) or own & urls:  # то же событие другим сюжетом или в другой теме
             continue
-        if used + st.duration <= budget:
+        if used < budget and used + st.duration <= budget * 1.2:
             chosen.append(st)
             seen.append(keys)
             urls |= own
@@ -165,12 +168,20 @@ def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))
 
 
-def intro_script(user: User, picked: list[Story]) -> str:
+def intro_script(user: User, picked: list[Story], day: date | None = None) -> str:
+    day = day or date.today()
     hour = int(user.delivery_time.split(":")[0])
     greet = "Доброе утро" if hour < 12 else ("Добрый день" if hour < 18 else "Добрый вечер")
     heads = [st.headline.rstrip(".") for st in picked if st.kind == "story"][:3]
     menu = (" Сегодня в выпуске: " + "; ".join(heads[:-1]) + (" и " if len(heads) > 1 else "") + heads[-1] + ".") if heads else ""
-    return f"{greet}, {user.name}! В эфире Клоп Новости, с вами Клоп Александрович.{menu} Поехали!"
+    extra = ""
+    if holidays.is_birthday(user.birthday, day):
+        extra += (f" {user.name}, с днём рождения! Вся редакция Клоп Новостей поздравляет: здоровья, радости "
+                  "и побольше хороших новостей.")
+    theme = holidays.theme_for(day)
+    if theme and theme.greeting:
+        extra += " " + theme.greeting
+    return f"{greet}, {user.name}! В эфире Клоп Новости, с вами Клоп Александрович.{extra}{menu} Поехали!"
 
 
 def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
@@ -186,21 +197,25 @@ def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     db.flush()
     work = s.media_dir / "clips" / edition
     topics = [t for t in cat["topics"] if any(st.topic == t for st in picked)]
-    intro = studio.Scene(kind="studio", date_label=label, title=f"Привет, {user.name}!",
+    day = date.fromisoformat(edition)
+    theme, birthday = holidays.theme_for(day), holidays.is_birthday(user.birthday, day)
+    intro = studio.Scene(kind="studio", date_label=label,
+                         title=f"С днём рождения, {user.name}!" if birthday else f"Привет, {user.name}!",
                          subtitle=f"Выпуск на {label}", color="#e23636",
                          pills=[(cat["topics"][t]["title"], cat["topics"][t]["color"]) for t in topics],
-                         lower="Ваш персональный выпуск новостей", tag="КЛОП·НОВОСТИ",
-                         nameplate=("Клоп Александрович", "ведущий · AI-ассистент · клоп в машине"),
-                         ticker=ticker_text(picked))
+                         lower="Праздничный выпуск — только для тебя" if birthday else "Ваш персональный выпуск новостей",
+                         tag="КЛОП·НОВОСТИ", nameplate=("Клоп Александрович", "ведущий · AI-ассистент · клоп в машине"),
+                         ticker=ticker_text(picked), theme=holidays.BIRTHDAY if birthday else theme)
     intro_path = work / f"intro_{ep.slug}.mp4"
-    intro_dur = studio.render_segment(intro, _anchor_wav(intro_script(user, picked), s), intro_path,
+    intro_dur = studio.render_segment(intro, _anchor_wav(intro_script(user, picked, day), s), intro_path,
                                       prefix=studio.jingle(RATE))
     outro_wav = _anchor_wav(OUTRO, s)
     outro = studio.Scene(kind="studio", date_label=label, title="До завтра!", subtitle="Клоп·Новости — семейный выпуск",
                          color="#e23636", lower="Ссылки на все источники — под видео  •  made by kadesnikov.com",
-                         tag="КЛОП·НОВОСТИ", ticker=ticker_text(stories))
-    # имя от озвучки и надписей: сменили голос или текст на экране — финал перерендерится
-    key = hashlib.sha256(f"{outro_wav.stem}|{outro.title}|{outro.subtitle}|{outro.lower}".encode()).hexdigest()[:12]
+                         tag="КЛОП·НОВОСТИ", ticker=ticker_text(stories), theme=theme)
+    # имя от озвучки, надписей и праздника: сменили голос или текст на экране — финал перерендерится
+    key = hashlib.sha256(f"{outro_wav.stem}|{outro.title}|{outro.subtitle}|{outro.lower}|{theme and theme.id}"
+                         .encode()).hexdigest()[:12]
     outro_path = work / f"outro_{key}.mp4"
     if not outro_path.exists():
         studio.render_segment(outro, outro_wav, outro_path, suffix=studio.jingle(RATE, up=False))
