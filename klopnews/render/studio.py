@@ -81,11 +81,12 @@ def fit_text(text: str, sizes: tuple[int, ...], width: int, max_lines: int, weig
     return f, wrap(text, f, width, max_lines)
 
 
-def pill(d: ImageDraw.ImageDraw, x: int, y: int, text: str, bg, size: int = 18, fg=INK) -> int:
+def pill(d: ImageDraw.ImageDraw, x: int, y: int, text: str, bg, size: int = 18, fg=INK, h: int = 0) -> int:
     f = font(size)
-    w = int(f.getlength(text)) + 24
-    d.rounded_rectangle([x, y, x + w, y + size + 14], radius=6, fill=bg)
-    d.text((x + 12, y + 6), text, font=f, fill=fg)
+    w, h = int(f.getlength(text)) + 24, h or size + 14
+    d.rounded_rectangle([x, y, x + w, y + h], radius=6, fill=bg)
+    top, bottom = f.getbbox(text)[1::2]  # по настоящим границам букв: КАПС иначе съезжает вверх
+    d.text((x + 12, y + (h - top - bottom) / 2), text, font=f, fill=fg)
     return x + w
 
 
@@ -241,9 +242,10 @@ def _chrome(img: Image.Image, sc: Scene, live: str):
     lower = sc.lower or sc.title
     if lower:
         d.rectangle([24, 606, W - 24, 652], fill=(250, 250, 252))
-        x = pill(d, 24, 606, sc.tag or "НОВОСТИ", hex_rgb(sc.color), 20) if sc.tag else 24
+        x = pill(d, 24, 606, sc.tag or "НОВОСТИ", hex_rgb(sc.color), 20, h=46) if sc.tag else 24
         f, lines = fit_text(lower, (22, 20, 18, 16), W - 60 - x, 1, "SemiBold")
-        d.text((x + 16, 629 - f.size // 2 - 2), lines[0], font=f, fill=(15, 20, 35))
+        top, bottom = f.getbbox(lines[0])[1::2]
+        d.text((x + 16, 629 - (top + bottom) / 2), lines[0], font=f, fill=(15, 20, 35))
     d.rectangle([0, 672, W, H], fill=(8, 14, 34))
     _ticker_label(d)
     if not sc.ticker:
