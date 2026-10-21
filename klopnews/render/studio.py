@@ -8,6 +8,7 @@ import hashlib
 import io
 import logging
 import math
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from klopnews.render import characters
-from klopnews.tts import read_wav, write_wav
+from klopnews.tts import loudnorm, read_wav, write_wav
 
 log = logging.getLogger(__name__)
 W, H, FPS, STEP = 1280, 720, 25, 0.08
@@ -87,9 +88,24 @@ def pill(d: ImageDraw.ImageDraw, x: int, y: int, text: str, bg, size: int = 18, 
     return x + w
 
 
+def bigger_image_url(url: str) -> str:
+    """Фиды часто отдают миниатюру; у BBC и WordPress размер прямо в адресе — просим крупную."""
+    url = re.sub(r"(ichef\.bbci\.co\.uk/(?:ace/)?(?:ws|standard|news)/)\d+/", r"\g<1>1024/", url)
+    return re.sub(r"-\d{2,4}x\d{2,4}(\.(?:jpe?g|png|webp))", r"\1", url, flags=re.I)
+
+
 def fetch_image(url: str | None, cache_dir: Path) -> Image.Image | None:
     if not url:
         return None
+    big = bigger_image_url(url)
+    if big != url:
+        img = _download(big, cache_dir)
+        if img is not None:
+            return img
+    return _download(url, cache_dir)
+
+
+def _download(url: str, cache_dir: Path) -> Image.Image | None:
     path = cache_dir / (hashlib.sha256(url.encode()).hexdigest()[:20] + ".jpg")
     try:
         if not path.exists():
@@ -125,6 +141,7 @@ class Scene:
     number: str = ""
     image: Image.Image | None = None
     image_credit: str = ""
+    credit: str = ""  # источник новости — в углу карточки
     lower: str = ""  # плашка снизу; по умолчанию — заголовок
     nameplate: tuple[str, str] | None = None  # (имя, подпись) — титр персонажа
     quotes: list[dict] = field(default_factory=list)  # блок рынков
@@ -227,7 +244,13 @@ def _card(img: Image.Image, sc: Scene) -> tuple[int, int, int]:
         d.text((x1 - 30 - font(64).getlength(sc.number), y0 + 18), sc.number, font=font(64), fill=(36, 56, 110))
     y = y0 + 30
     if sc.tag:
-        pill(d, x0 + 30, y, sc.tag, color, 18)
+        right = pill(d, x0 + 30, y, sc.tag, color, 18)
+        if sc.credit:
+            f = font(16, "Medium")
+            t = ellipsize(sc.credit, f, x1 - 30 - right - 40)
+            tw = f.getlength(t)
+            d.rounded_rectangle([x1 - 30 - tw - 20, y, x1 - 30, y + 32], radius=6, fill=(8, 14, 34))
+            d.text((x1 - 40 - tw, y + 7), t, font=f, fill=MUTED)
         y += 52
     f, lines = fit_text(sc.title, (48, 42, 36) if sc.subtitle else (40, 36, 32, 28),
                         x1 - x0 - 60 - (90 if sc.number else 0), 3)
@@ -260,15 +283,17 @@ def _card(img: Image.Image, sc: Scene) -> tuple[int, int, int]:
 def _quotes(d, quotes, x, y, w):
     from klopnews.markets import fmt_change, fmt_price
 
-    f, fs = font(26, "SemiBold"), font(26)
-    for q in quotes[:7]:
+    quotes = quotes[:12]
+    row = min(48, (CARD[3] - 24 - y) // max(len(quotes), 1))  # сколько бы инструментов ни было — влезают
+    f, fs = font(row * 26 // 48, "SemiBold"), font(row * 26 // 48)
+    for q in quotes:
         up = q["change_pct"] >= 0
         d.text((x, y), q["name"], font=f, fill=INK)
         price = fmt_price(q)
         d.text((x + w * 0.55 - f.getlength(price), y), price, font=f, fill=INK)
         ch = ("▲ " if up else "▼ ") + fmt_change(q)
         d.text((x + w - fs.getlength(ch), y), ch, font=fs, fill=GREEN if up else RED)
-        y += 48
+        y += row
 
 
 def fit_bullets(bullets: list[str], area: tuple[int, int, int], bottom: int) -> tuple[ImageFont.FreeTypeFont, list[list[str]]]:
@@ -307,9 +332,25 @@ def _bullets_layer(sc: Scene, area: tuple[int, int, int], fitted, k: int) -> Ima
     return layer
 
 
+def _photo_backdrop(photo: Image.Image) -> Image.Image:
+    """Фото на весь кадр. Мелкое (миниатюра из RSS) не растягиваем в мыло: размытая подложка, а поверх —
+    само фото, увеличенное не больше чем вдвое, слева от Клопика."""
+    if photo.width >= W * 0.8:
+        return cover(photo, W, H)
+    img = ImageEnhance.Brightness(cover(photo.resize((photo.width // 4 or 1, photo.height // 4 or 1)), W, H)
+                                  .filter(ImageFilter.GaussianBlur(18))).enhance(0.6)
+    box_w, box_h = 800, H - 58 - 48 - 60  # между шапкой и плашкой снизу
+    scale = min(box_w / photo.width, box_h / photo.height, 2.0)
+    fg = photo.resize((round(photo.width * scale), round(photo.height * scale)), Image.LANCZOS)
+    if scale > 1:
+        fg = fg.filter(ImageFilter.UnsharpMask(radius=2, percent=60, threshold=2))
+    img.paste(fg, (40 + (box_w - fg.width) // 2, 58 + 30 + (box_h - fg.height) // 2))
+    return img
+
+
 def _report_base(sc: Scene) -> Image.Image:
     if sc.image is not None:
-        img = ImageEnhance.Brightness(cover(sc.image, W, H)).enhance(0.78)
+        img = ImageEnhance.Brightness(_photo_backdrop(sc.image)).enhance(0.78)
     else:
         img = _background(7)
         d = ImageDraw.Draw(img)
@@ -390,7 +431,7 @@ def timeline(samples: np.ndarray, rate: int, n_bullets: int, seed: int = 0) -> l
 def render_segment(sc: Scene, wav: Path, out: Path, lead: float = 0.3, tail: float = 0.5,
                    prefix: np.ndarray | None = None, suffix: np.ndarray | None = None) -> float:
     """Сцена + дорожка → mp4. prefix/suffix — джингл до и после голоса. Возвращает длительность."""
-    voice, rate = read_wav(wav)
+    voice, rate = loudnorm(wav)
     parts = [np.zeros(int(rate * lead), np.float32), voice, np.zeros(int(rate * tail), np.float32)]
     if prefix is not None:
         parts.insert(0, prefix)

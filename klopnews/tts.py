@@ -72,6 +72,20 @@ def write_wav(path: Path, samples: np.ndarray, rate: int = RATE) -> None:
         w.writeframes((np.clip(samples, -1, 1) * 32767).astype("<i2").tobytes())
 
 
+def loudnorm(path: Path) -> tuple[np.ndarray, int]:
+    """Дорожка, приведённая к одной громкости (EBU R128, -16 LUFS) с поджатым разбросом между фразами.
+
+    Каждый сюжет озвучивается отдельным запросом, и модель отдаёт их то тише, то громче — в выпуске это скачет.
+    """
+    out = path.with_suffix(".norm.wav")
+    if not out.exists():
+        tmp = path.with_suffix(".norm.part.wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(path), "-af", "loudnorm=I=-16:LRA=5:TP=-1.5",
+                        "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(tmp)], check=True)
+        tmp.rename(out)
+    return read_wav(out)
+
+
 def read_wav(path: Path) -> tuple[np.ndarray, int]:
     """Моно float32 и частота (файлы пишет только write_wav: 16 бит, моно)."""
     with wave.open(str(path), "rb") as w:

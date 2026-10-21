@@ -33,6 +33,11 @@ def _anchor_wav(text: str, s: Settings) -> Path:
     return synthesize(text, s.anchor_voice, s.anchor_instructions, s)
 
 
+def credit_text(st: Story) -> str:
+    names = list(dict.fromkeys(src["name"] for src in st.sources))
+    return (("Источник: " if len(names) == 1 else "Источники: ") + ", ".join(names)) if names else ""
+
+
 def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
     color = cat["topics"].get(st.topic, {}).get("color", "#3b82f6")
     image = studio.fetch_image(st.image_url, s.media_dir / "img")
@@ -40,7 +45,7 @@ def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
     label = date_label(st.edition)
     scene = studio.Scene(kind="studio", date_label=label, tag=st.tag or cat["topics"][st.topic]["title"].upper(),
                          color=color, title=st.headline, bullets=st.bullets, image=image,
-                         quotes=st.data.get("quotes", []), ticker=ticker)
+                         quotes=st.data.get("quotes", []), ticker=ticker, credit=credit_text(st))
     if st.kind == "brief":
         scene.lower = f"Коротко: {st.headline}"
     out = base / f"{st.id}.mp4"
@@ -139,20 +144,22 @@ def _key_words(headline: str) -> set[str]:
 def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]:
     """Сюжеты под настройки человека, по важности, пока влезают в его длительность.
 
-    Порядок в выпуске: главные сюжеты, рынки, потом «коротко».
+    Рынки (индексы и курсы валют) берутся всегда, если выбрана тема «Рынки и деньги»: иначе важные сюжеты
+    выедают весь бюджет раньше них. Порядок в выпуске: главные сюжеты, рынки, потом «коротко».
     """
     muted = set(user.muted_sources or [])
     ok = [st for st in stories if st.status == "ready"
           and (not user.topics or st.topic in user.topics)
           and (st.kind == "markets" or any(src["id"] not in muted for src in st.sources))]
-    chosen, used, seen = [], 0.0, []
-    for st in sorted(ok, key=lambda x: -x.importance):
-        keys = _key_words(st.headline)
-        if any(len(keys & k) >= 2 for k in seen):  # то же событие другим сюжетом (GCash и GCash, Maersk и Maersk)
+    chosen, used, seen, urls = [], 0.0, [], set()
+    for st in sorted(ok, key=lambda x: (x.kind != "markets", -x.importance)):
+        keys, own = _key_words(st.headline), {src["url"] for src in st.sources}
+        if any(len(keys & k) >= 2 for k in seen) or own & urls:  # то же событие другим сюжетом или в другой теме
             continue
         if used + st.duration <= budget:
             chosen.append(st)
             seen.append(keys)
+            urls |= own
             used += st.duration
     rank = {"story": 0, "markets": 1, "brief": 2}
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))

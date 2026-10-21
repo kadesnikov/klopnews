@@ -4,7 +4,7 @@ from klopnews.producer import intro_script, pick_stories
 
 def st(topic, imp, dur, kind="story", src="a"):
     return Story(edition="2026-10-20", topic=topic, kind=kind, importance=imp, headline=f"{topic}{imp}", script="",
-                 sources=[{"id": src, "name": src, "url": "u"}] if kind != "markets" else [], duration=dur, status="ready")
+                 sources=[{"id": src, "name": src, "url": f"u/{topic}{imp}"}] if kind != "markets" else [], duration=dur, status="ready")
 
 
 def test_pick_respects_topics_muted_sources_and_budget():
@@ -36,3 +36,11 @@ def test_same_event_twice_is_shown_once():
     stories[2].headline = "Maersk строит железнодорожную сеть во Вьетнаме"
     picked = pick_stories(User(topics=[], muted_sources=[]), stories, 600)
     assert [p.importance for p in picked] == [9, 7]
+
+
+def test_markets_always_fit_and_same_article_twice_is_dropped():
+    stories = [st("ai", 9, 60), st("science", 8, 60), st("finance", 7, 50, "markets")]
+    stories[0].headline, stories[1].headline = "Quantinuum привлекла инвесторов", "Квантовый компьютер побил рекорд"
+    stories[1].sources = stories[0].sources  # одна статья Ars в двух темах
+    picked = pick_stories(User(topics=[], muted_sources=[]), stories, budget=115)
+    assert [p.kind for p in picked] == ["story", "markets"]

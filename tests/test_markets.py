@@ -13,3 +13,12 @@ def test_formatting():
     assert fmt_price({"price": 98123.4}) == "98 123"
     assert fmt_change({"change_pct": -1.27}) == "−1,3%"
     assert fmt_change({"change_pct": 0.42}) == "+0,4%"
+
+
+def test_bigger_image_url():
+    from klopnews.render.studio import bigger_image_url
+
+    assert bigger_image_url("https://ichef.bbci.co.uk/ace/ws/240/cpsprodpb/a/b.jpg") == \
+        "https://ichef.bbci.co.uk/ace/ws/1024/cpsprodpb/a/b.jpg"
+    assert bigger_image_url("https://x.com/wp/photo-300x200.jpg") == "https://x.com/wp/photo.jpg"
+    assert bigger_image_url("https://x.com/a.jpg") == "https://x.com/a.jpg"

@@ -52,6 +52,19 @@ def test_full_pipeline(monkeypatch):
         assert "verge" not in u.muted_sources and "irozhlas" in u.muted_sources
 
 
+def test_article_in_two_topics_becomes_one_story(monkeypatch):
+    monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
+    monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [])
+    monkeypatch.setattr("klopnews.render.studio.render_segment", lambda *a, **k: 1.0)
+    s = settings()
+    with session() as db:
+        db.add(Item(source_id="ars", url="https://ex.com/q", title="Quantinuum quantum record", summary="",
+                    published_at=utcnow() - timedelta(hours=1)))  # Ars — в темах ai и science
+        db.commit()
+        producer.build_edition(db, s, "2026-10-20", utcnow())
+        assert db.query(Story).count() == 1
+
+
 def test_rebuild_resumes_without_duplicates(monkeypatch):
     monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
     monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [])

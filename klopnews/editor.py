@@ -58,8 +58,9 @@ REPORTER_NOTE = " Этот сюжет идёт с прямым включени�
 MARKETS = PERSONA + "\n\n" + RULES + """
 
 Сделай блок «Рынки» на 40–60 секунд (80–120 слов) по котировкам и финансовым новостям ниже.
-Цифры — только из таблицы котировок, проценты округляй до десятых. Объясни простыми словами, что двигало рынки,
-если это есть в новостях. Никаких инвестиционных советов.
+Цифры — только из таблицы котировок, проценты округляй до десятых. Обязательно скажи, как вели себя фондовые индексы
+и сколько стоят евро и доллар в кронах. Объясни простыми словами, что двигало рынки, если это есть в новостях.
+Никаких инвестиционных советов.
 Формат: {"markets": true, "script": "текст для ведущего", "bullets": ["2–3 пункта для экрана"]}"""
 
 
@@ -75,9 +76,12 @@ def blocked_by_filter(e: Exception) -> bool:
     return "content_filter" in str(e) or "high risk" in str(e)
 
 
-def select_events(llm, topic_title: str, items: list[Item], sources: dict, covered: list[str], n: int) -> list[dict]:
+def select_events(llm, topic_title: str, items: list[Item], sources: dict, covered: list[str], n: int,
+                  taken: list[str] = ()) -> list[dict]:
     lines = [f"[{i}] ({sources[it.source_id]['name']}) {it.title} — {it.summary[:200]}" for i, it in enumerate(items)]
     user = ("Уже были в эфире (не повторять, если нет нового развития): " + ("; ".join(covered) or "—")
+            + "\n\nУже взяты в сегодняшний выпуск в других темах (эти события не выбирай совсем, даже из других "
+            "источников): " + ("; ".join(taken) or "—")
             + "\n\nНовости:\n" + "\n".join(lines))
     try:
         events = ask_json(llm, SELECT.format(topic=topic_title, n=n), user).get("events", [])
@@ -89,8 +93,8 @@ def select_events(llm, topic_title: str, items: list[Item], sources: dict, cover
             return []
         # делим пополам, пока не отсеется новость, которая не нравится фильтру
         half = len(items) // 2
-        both = (select_events(llm, topic_title, items[:half], sources, covered, n)
-                + select_events(llm, topic_title, items[half:], sources, covered, n))
+        both = (select_events(llm, topic_title, items[:half], sources, covered, n, taken)
+                + select_events(llm, topic_title, items[half:], sources, covered, n, taken))
         return sorted(both, key=lambda e: -e["importance"])[:n]
     out = []
     for ev in events:
@@ -106,7 +110,7 @@ def write_story(llm, ev: dict, topic: str, sources: dict, edition: str, reporter
     parts, image = [], None
     for it in ev["items"][:3]:
         art = feeds.article(it.url) if len(parts) < 2 else {"text": "", "image": None}
-        image = image or it.image_url or art["image"]
+        image = image or art["image"] or it.image_url  # og:image крупнее картинки из RSS
         parts.append(f"Источник: {sources[it.source_id]['name']}\nЗаголовок: {it.title}\n"
                      f"Анонс: {it.summary}\nТекст: {art['text'] or '—'}")
     system = WRITE.format(length=(MAIN if main else BRIEF) + (REPORTER_NOTE if reporter else ""),
@@ -148,6 +152,9 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
     used = {src["url"] for (srcs,) in db.execute(select(Story.sources).where(Story.edition < edition, Story.edition >= yday))
             for src in srcs}
     picked: list[tuple[str, dict]] = []
+    # одна статья бывает в двух темах (Ars — и ИИ, и наука), одно событие — у разных источников разных тем:
+    # что уже взято в выпуск, следующим темам не показываем и называем модели, чтобы не взяла его из другого источника
+    taken = list(db.scalars(select(Story.headline).where(Story.edition == edition)))
     for topic, meta in cat["topics"].items():
         items = [it for it in recent_items(db, sources, topic, since) if it.url not in used]
         if not items:
@@ -156,8 +163,10 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
         # вчерашние и уже написанные сегодня (если сборка дописывает день): иначе одно событие придёт дважды
         covered = list(db.scalars(select(Story.headline).where(Story.edition.in_([yday, edition]), Story.topic == topic)))
         try:
-            events = select_events(llm, meta["title"], items, sources, covered, per_topic)
+            events = select_events(llm, meta["title"], items, sources, covered, per_topic, taken)
             picked += [(topic, ev) for ev in events]
+            used |= {it.url for ev in events for it in ev["items"]}
+            taken += [ev["items"][0].title for ev in events]
             log.info("тема %s: %d новостей → %d событий", topic, len(items), len(events))
         except Exception as e:
             log.error("select_failed %s: %r", topic, e)

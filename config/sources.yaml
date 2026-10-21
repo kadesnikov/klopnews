@@ -50,4 +50,7 @@ markets:
   - {symbol: "GC=F", name: "Золото", unit: "$"}
   - {symbol: "BZ=F", name: "Нефть Brent", unit: "$"}
   - {symbol: "BTC-USD", name: "Биткоин", unit: "$"}
-  - {symbol: "EURCZK=X", name: "EUR/CZK", digits: 3}
+  - {symbol: "EURCZK=X", name: "Евро в кронах", digits: 2}
+  - {symbol: "CZK=X", name: "Доллар в кронах", digits: 2}
+  - {symbol: "EURUSD=X", name: "EUR/USD", digits: 4}
+  - {symbol: "RUB=X", name: "Доллар в рублях", digits: 2}
