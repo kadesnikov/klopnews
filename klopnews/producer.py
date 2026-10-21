@@ -148,12 +148,13 @@ def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]
 
     Длительность — ориентир, а не потолок: сюжет, который начинается до конца бюджета, берём, если выпуск выйдет
     длиннее не больше чем на 20%. Мало новостей — выпуск честно короче.
-    Короткий блок «Рынки» (индексы, акции дня, курсы) — всем и всегда, независимо от тем.
+    Короткий блок «Рынки» (индексы, акции дня, курсы) — всем, кто не отключил тему «Рынки и деньги»,
+    и вне очереди: иначе важные сюжеты выедают время раньше него.
     Порядок в выпуске: главные сюжеты, рынки, потом «коротко».
     """
     muted = set(user.muted_sources or [])
-    ok = [st for st in stories if st.status == "ready" and (st.kind == "markets" or (
-        (not user.topics or st.topic in user.topics) and any(src["id"] not in muted for src in st.sources)))]
+    ok = [st for st in stories if st.status == "ready" and (not user.topics or st.topic in user.topics)
+          and (st.kind == "markets" or any(src["id"] not in muted for src in st.sources))]
     chosen, used, seen, urls = [], 0.0, [], set()
     for st in sorted(ok, key=lambda x: (x.kind != "markets", -x.importance)):
         keys, own = _key_words(st.headline), {src["url"] for src in st.sources}

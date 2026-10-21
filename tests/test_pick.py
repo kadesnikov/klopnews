@@ -18,7 +18,7 @@ def test_pick_respects_topics_muted_sources_and_budget():
     picked = pick_stories(user, stories, budget=175)
     assert [p.headline for p in picked] == ["ai9", "ai7", "finance7", "ai3"]  # world — заглушён
     picked = pick_stories(User(name="Петя", topics=["ai"], muted_sources=[]), stories, budget=1000)
-    assert "markets" in [p.kind for p in picked]  # рынки — всем, даже без темы «Рынки и деньги»
+    assert "markets" not in [p.kind for p in picked]  # тему «Рынки и деньги» отключил — рынков нет
     picked = pick_stories(user, stories, budget=1000)
     assert [p.kind for p in picked] == ["story", "story", "markets", "brief"]
 
