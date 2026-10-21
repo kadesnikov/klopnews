@@ -50,9 +50,12 @@ class Settings(BaseSettings):
     reporter_enabled: bool = True
     reporters_per_edition: int = 2
 
+    brave_api_key: str = ""  # поиск ИИ-ивентов в Праге (как в piano-piano); пусто — только страницы-афиши
+
     telegram_bot_token: str = ""
     telegram_bot_username: str = ""
     allowed_telegram_ids: str = ""  # через запятую; пусто — пускать всех
+    admin_telegram_ids: str = ""  # кому открыта /admin (через запятую)
 
     edition_time: str = "05:30"  # когда собирать сюжеты дня (по timezone)
     default_delivery_time: str = "07:30"
@@ -62,6 +65,10 @@ class Settings(BaseSettings):
     @property
     def allowed_ids(self) -> set[int]:
         return {int(x) for x in self.allowed_telegram_ids.replace(" ", "").split(",") if x}
+
+    @property
+    def admin_ids(self) -> set[int]:
+        return {int(x) for x in self.admin_telegram_ids.replace(" ", "").split(",") if x}
 
     @property
     def media_dir(self) -> Path:
@@ -86,11 +93,12 @@ def settings() -> Settings:
 
 @lru_cache
 def catalog(path: Path | None = None) -> dict:
-    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...], 'movers': [...]}"""
+    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...], 'movers': [...], 'events': {city, pages, searches}}"""
     raw = yaml.safe_load((path or settings().sources_file).read_text(encoding="utf-8"))
     return {
         "topics": raw["topics"],
         "sources": {s["id"]: s for s in raw["sources"]},
         "markets": raw.get("markets", []),
         "movers": raw.get("movers", []),
+        "events": raw.get("events") or {},
     }

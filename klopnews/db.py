@@ -47,7 +47,7 @@ class Story(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     edition: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
     topic: Mapped[str] = mapped_column(String(20))
-    kind: Mapped[str] = mapped_column(String(10), default="story")  # story | brief | markets
+    kind: Mapped[str] = mapped_column(String(10), default="story")  # story | brief | markets | events
     importance: Mapped[int] = mapped_column(Integer, default=5)
     headline: Mapped[str] = mapped_column(String(300))
     tag: Mapped[str] = mapped_column(String(40), default="")
@@ -81,6 +81,45 @@ class Episode(Base):
     chapters: Mapped[list] = mapped_column(JSON, default=list)  # [{t, title, topic, sources}]
     notified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Event(Base):
+    """ИИ-ивент в Праге из афиш и поиска (klopnews/events.py)."""
+    __tablename__ = "events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(200), unique=True)  # дата:название — склейка дублей
+    title: Mapped[str] = mapped_column(String(300))
+    starts_at: Mapped[datetime] = mapped_column(DateTime, index=True)  # UTC; без времени — полночь по Праге
+    has_time: Mapped[bool] = mapped_column(Boolean, default=True)
+    place: Mapped[str] = mapped_column(String(300), default="")
+    price: Mapped[str] = mapped_column(String(100), default="")
+    free: Mapped[bool] = mapped_column(Boolean, default=False)
+    lang: Mapped[str] = mapped_column(String(10), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(String(1000), default="")
+    found_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    announced: Mapped[bool] = mapped_column(Boolean, default=False)  # уже был в выпуске
+
+
+class EventPage(Base):
+    """Отпечаток прочитанной страницы-афиши: не изменилась — модель её не перечитывает."""
+    __tablename__ = "event_pages"
+    url: Mapped[str] = mapped_column(String(1000), primary_key=True)
+    text_hash: Mapped[str] = mapped_column(String(64))
+    read_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class View(Base):
+    """Один просмотр страницы выпуска: плеер раз в несколько секунд сообщает, докуда досмотрели."""
+    __tablename__ = "views"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(32), unique=True)  # генерирует страница при открытии
+    episode_id: Mapped[int] = mapped_column(ForeignKey("episodes.id"), index=True)
+    viewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # None — гость по ссылке
+    max_t: Mapped[float] = mapped_column(Float, default=0.0)  # самая дальняя точка, секунды
+    played: Mapped[float] = mapped_column(Float, default=0.0)  # сколько секунд реально играло
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 NEW_COLUMNS = [("users", "birthday", "VARCHAR(10)")]

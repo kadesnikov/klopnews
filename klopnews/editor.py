@@ -4,14 +4,17 @@
 2. По каждому событию качаем полные тексты статей и пишем сюжет: главный (~1 мин) или «коротко» (~20 с).
 3. Пара лучших событий с конкретным местом получает прямое включение Клопика.
 4. Блок «Рынки» — по настоящим котировкам.
+5. Блок «ИИ в Праге» — по найденным ивентам (klopnews/events.py).
 """
 import logging
+import re
+import unicodedata
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from klopnews import feeds, markets
-from klopnews.db import Item, Story
+from klopnews import events, feeds, markets
+from klopnews.db import Event, Item, Story
 from klopnews.llm import ask_json
 
 log = logging.getLogger(__name__)
@@ -65,6 +68,15 @@ MARKETS = PERSONA + "\n\n" + RULES + """
 3. Курс евро и доллара в кронах одной фразой.
 Цифры — только из таблиц, проценты округляй до десятых. Никаких инвестиционных советов.
 Формат: {"markets": true, "script": "текст для ведущего", "bullets": ["2–3 пункта для экрана"]}"""
+
+
+AFISHA = PERSONA + "\n\n" + RULES + """
+
+Сделай блок «ИИ в Праге» на 40–70 секунд (80–140 слов): какие события про искусственный интеллект будут в Праге
+на этой неделе. Только события из списка ниже, с их днями — не выдумывай ничего сверх списка. Самые интересные
+назови с днём и местом, остальные — одной фразой. Скажи, кому что подойдёт, если это понятно из описания.
+Можно одну фразу мнения Клопа. Время и адреса не диктуй целиком — ссылки на всё будут под видео.
+Формат: {"afisha": true, "script": "текст для ведущего"}"""
 
 
 def recent_items(db, sources: dict, topic: str, since: datetime, limit: int = 60) -> list[Item]:
@@ -143,6 +155,23 @@ def write_markets(llm, quotes: list[dict], stocks: list[dict], items: list[Item]
     return Story(edition=edition, topic="finance", kind="markets", importance=7, headline="Рынки за день",
                  tag="РЫНКИ", bullets=[str(b)[:80] for b in d.get("bullets", [])][:3], script=str(d["script"]),
                  sources=[], data={"quotes": quotes, "movers": markets.top_movers(stocks)})
+
+
+def no_emoji(text: str) -> str:
+    """В шрифте студии нет эмодзи — вместо 🦞 на экране был бы пустой квадрат."""
+    return re.sub(r"\s+", " ", "".join(c for c in text if unicodedata.category(c) not in ("So", "Cs", "Cn"))).strip()
+
+
+def write_events(llm, evs: list[Event], cfg: dict, edition: str) -> Story | None:
+    """Блок «ИИ в Праге». Даты на экране — из базы, модель только рассказывает."""
+    if not evs:
+        return None
+    listing = "\n".join(f"- {events.line(e, cfg)}. {e.summary}" for e in evs[:12])
+    d = ask_json(llm, AFISHA, f"События на неделю:\n{listing}")
+    sources = list({e.url: {"id": "events", "name": e.title[:80], "url": e.url} for e in evs if e.url}.values())
+    return Story(edition=edition, topic="ai", kind="events", importance=6, headline="ИИ в Праге: афиша недели",
+                 tag="АФИША", bullets=[no_emoji(f"{events.when(e, cfg).split(',')[0]} · {e.title}")[:80] for e in evs[:4]],
+                 script=str(d["script"]), place="Прага", sources=sources[:12], data={"events": [e.id for e in evs]})
 
 
 def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enabled: bool = True,

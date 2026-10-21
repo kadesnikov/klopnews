@@ -76,3 +76,28 @@ movers:
   - {symbol: AAPL, name: Apple, group: бигтех}
   - {symbol: TSLA, name: Tesla, group: бигтех}
   - {symbol: PLTR, name: Palantir, group: бигтех}
+
+# Блок «ИИ в Праге»: митапы, лекции, хакатоны, конференции про ИИ на ближайшую неделю — у кого включена тема ИИ.
+# Сбор раз в день перед сюжетами; неизменившиеся страницы модель не перечитывает (до недели).
+# Блок выходит, когда нашлось новое, и по понедельникам — обзор недели.
+events:
+  city: Praha
+  timezone: Europe/Prague
+  # Страницы с афишей — читаются всегда (schema.org Event или просто текст)
+  pages:
+    - https://prague.aitinkerers.org/
+    - https://luma.com/prague  # городская афиша Luma: на ней почти все ИИ-митапы Праги
+  # Запросы в поиск (нужен BRAVE_API_KEY). Найденные страницы без слова об ИИ до модели не доходят
+  searches:
+    - AI meetup Prague
+    - umělá inteligence meetup Praha
+    - přednáška umělá inteligence Praha
+    - site:meetup.com Prague machine learning
+    - site:luma.com Prague AI
+    - site:luma.com Praha AI agents
+    # Agents 0.0.7 (Etnetera): OpenClaw Night Prague, Agents in Action Night Prague
+    - Agents in Action Night Prague
+    - OpenClaw Night Prague
+    - site:goout.net umělá inteligence Praha
+    - hackathon AI Prague
+    - Machine Learning Prague conference
