@@ -1,5 +1,6 @@
 """Сайт: страница выпуска (открыта по ссылке — удобно делиться), список выпусков и настройки (по входу из бота)."""
 import re
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -153,6 +154,10 @@ async def save_settings(request: Request):
         user.minutes = max(3, min(20, int(form.get("minutes") or user.minutes)))
         t = str(form.get("delivery_time", ""))
         user.delivery_time = t if len(t) == 5 and t[2] == ":" else user.delivery_time
+        try:
+            user.birthday = date.fromisoformat(str(form.get("birthday", ""))).isoformat()
+        except ValueError:
+            user.birthday = None
         user.topics = [x for x in form.getlist("topics") if x in cat["topics"]]
         enabled = set(form.getlist("sources"))
         user.muted_sources = [sid for sid in cat["sources"] if sid not in enabled]

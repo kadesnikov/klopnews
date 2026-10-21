@@ -24,6 +24,7 @@ class User(Base):
     muted_sources: Mapped[list] = mapped_column(JSON, default=list)
     minutes: Mapped[int] = mapped_column(Integer, default=10)
     delivery_time: Mapped[str] = mapped_column(String(5), default="07:30")
+    birthday: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD: поздравить в интро
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -121,6 +122,9 @@ class View(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+NEW_COLUMNS = [("users", "birthday", "VARCHAR(10)")]
+
+
 @lru_cache
 def engine(url: str):
     eng = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
@@ -130,6 +134,10 @@ def engine(url: str):
         conn.execute("PRAGMA journal_mode=WAL")
 
     Base.metadata.create_all(eng)
+    with eng.begin() as conn:  # create_all не добавляет колонки в существующие таблицы — дописываем сами
+        for table, column, ddl in NEW_COLUMNS:
+            if column not in {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
     return eng
 
 
