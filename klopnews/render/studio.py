@@ -134,7 +134,7 @@ def cover(img: Image.Image, w: int, h: int) -> Image.Image:
 @dataclass
 class Scene:
     """Что показать, пока звучит одна аудиодорожка."""
-    kind: str  # studio | report
+    kind: str  # studio | report | weather
     date_label: str
     tag: str = ""
     color: str = "#3b82f6"
@@ -152,16 +152,36 @@ class Scene:
     ticker: str = ""  # бегущая строка внизу: главные заголовки дня
     theme: object = None  # holidays.Theme: костюмы, украшения и плашка праздника
     movers: list[dict] = field(default_factory=list)  # акции дня рядом с котировками
+    weather: dict | None = None  # прогноз (weather.fetch) для сцены погоды
+    gear: str = ""  # наряд Клопика по погоде: umbrella+winter+sunglasses
 
 
 def _decor(img: Image.Image, kind: str, palette: tuple, seed: int) -> Image.Image:
     """Праздничные украшения поверх фона студии: полупрозрачные, чтобы не спорить с текстом."""
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d, rng = ImageDraw.Draw(layer), np.random.default_rng(seed)
-    for _ in range(46):
+    if kind == "sun":
+        for k in range(14):  # лучи из угла
+            a = math.pi * (0.5 + k / 26)
+            d.polygon([(W - 120, 90), (W - 120 + math.cos(a) * 900, 90 + math.sin(a) * 900),
+                       (W - 120 + math.cos(a + 0.05) * 900, 90 + math.sin(a + 0.05) * 900)], fill=(255, 190, 60, 40))
+        layer = layer.filter(ImageFilter.GaussianBlur(10))
+        d = ImageDraw.Draw(layer)
+        d.ellipse([W - 200, 10, W - 40, 170], fill=(255, 200, 60, 220))
+        return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+    if kind == "clouds":
+        for _ in range(9):
+            x, y, s = int(rng.integers(0, W)), int(rng.integers(70, 300)), int(rng.integers(50, 110))
+            for dx, dy, k in ((0, 0, 1), (-s * 0.7, s * 0.25, 0.7), (s * 0.7, s * 0.25, 0.75)):
+                d.ellipse([x + dx - s * k, y + dy - s * k * 0.6, x + dx + s * k, y + dy + s * k * 0.6],
+                          fill=(200, 210, 230, 45))
+        return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+    for _ in range(140 if kind == "rain" else 46):
         x, y, s = int(rng.integers(0, W)), int(rng.integers(60, 600)), int(rng.integers(8, 22))
         c = palette[int(rng.integers(len(palette)))] + (int(rng.integers(110, 200)),)
-        if kind == "snow":
+        if kind == "rain":
+            d.line([x, y, x - s / 3, y + s * 1.5], fill=(150, 190, 255, 150), width=2)
+        elif kind == "snow":
             d.ellipse([x - s / 3, y - s / 3, x + s / 3, y + s / 3], fill=c)
         elif kind == "hearts":
             d.ellipse([x - s, y - s, x, y], fill=c)
@@ -437,6 +457,57 @@ def _report_base(sc: Scene) -> Image.Image:
     return img
 
 
+WEATHER_DECOR = {"sun": "sun", "cloud": "clouds", "fog": "clouds", "rain": "rain", "storm": "rain", "snow": "snow"}
+
+
+def _weather_base(sc: Scene) -> Image.Image:
+    """Прогноз: слева табло с температурой, справа — место для Клопика."""
+    from klopnews import weather
+
+    w = sc.weather
+    s = weather.sky(w)
+    img = _decor(_background(11), WEATHER_DECOR[s], SNOW_COLORS, 11)
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = 40, 96, 660, 500
+    d.rounded_rectangle([x0, y0, x1, y1], radius=18, fill=PANEL, outline=(56, 189, 248), width=3)
+    pill(d, x0 + 30, y0 + 28, "ПОГОДА", (56, 189, 248), 18)
+    d.text((x0 + 30, y0 + 80), sc.title, font=font(40), fill=INK)
+    big = f"{weather.temp(w['tmax'])}"
+    d.text((x0 + 30, y0 + 140), big, font=font(120), fill=YELLOW)
+    d.text((x0 + 40 + font(120).getlength(big), y0 + 200), f"ночью {weather.temp(w['tmin'])}",
+           font=font(30, "SemiBold"), fill=MUTED)
+    _sky_icon(d, s, x1 - 110, y0 + 95)
+    lines = [weather.WORDS[s].capitalize() + (f", вероятность осадков {w['rain_prob']}%" if w["rain_prob"] >= 30 else ""),
+             f"Ветер до {w['wind']} м/с"]
+    y = y0 + 300
+    for line in lines:
+        d.text((x0 + 30, y), line, font=font(28, "Medium"), fill=INK)
+        y += 44
+    return img
+
+
+SNOW_COLORS = ((255, 255, 255), (200, 225, 255))
+
+
+def _sky_icon(d: ImageDraw.ImageDraw, s: str, cx: int, cy: int):
+    if s == "sun":
+        for k in range(8):
+            a = k * math.pi / 4
+            d.line([cx + math.cos(a) * 52, cy + math.sin(a) * 52, cx + math.cos(a) * 72, cy + math.sin(a) * 72],
+                   fill=YELLOW, width=8)
+        d.ellipse([cx - 40, cy - 40, cx + 40, cy + 40], fill=YELLOW)
+        return
+    for dx, dy, r in ((-28, 8, 34), (18, -8, 44), (52, 14, 30)):
+        d.ellipse([cx + dx - r, cy + dy - r, cx + dx + r, cy + dy + r], fill=(200, 210, 230))
+    d.rectangle([cx - 28, cy + 8, cx + 52, cy + 44], fill=(200, 210, 230))
+    if s in ("rain", "storm"):
+        for dx in (-24, 6, 36):
+            d.line([cx + dx, cy + 58, cx + dx - 10, cy + 84], fill=(96, 165, 250), width=6)
+    elif s == "snow":
+        for dx in (-24, 6, 36):
+            d.ellipse([cx + dx - 7, cy + 60, cx + dx + 7, cy + 74], fill=INK)
+
+
 class Frames:
     """Рисует кадр по состоянию (рот, моргание, усики, пунктов на экране) с кэшем фона."""
 
@@ -445,6 +516,9 @@ class Frames:
         if sc.kind == "report":
             self.base, self.area, self.fitted = _report_base(sc), (0, 0, 0), (None, [])
             _chrome(self.base, sc, "ПРЯМОЕ ВКЛЮЧЕНИЕ")
+        elif sc.kind == "weather":
+            self.base, self.area, self.fitted = _weather_base(sc), (0, 0, 0), (None, [])
+            _chrome(self.base, sc, "ПРОГНОЗ")
         else:
             self.base = _background(len(sc.title), sc.theme)
             self.area = _card(self.base, sc)
@@ -459,8 +533,8 @@ class Frames:
     def render(self, mouth: int, blink: bool, sway: int, k: int) -> Image.Image:
         img = self.base.copy()
         dress = self.sc.theme.costume if self.sc.theme else ""
-        if self.sc.kind == "report":
-            sprite = characters.reporter(mouth, blink, sway, dress).resize((506, 540), Image.LANCZOS)
+        if self.sc.kind in ("report", "weather"):
+            sprite = characters.reporter(mouth, blink, sway, dress, self.sc.gear).resize((506, 540), Image.LANCZOS)
             img.paste(sprite, (W - 560, 606 - 540), sprite)
         else:
             sprite = characters.anchor(mouth, blink, sway, dress).crop((0, 0, 440, 400))

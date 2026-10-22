@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from klopnews import editor, events, holidays
+from klopnews import editor, events, holidays, weather
 from klopnews.config import Settings, catalog
 from klopnews.db import Edition, Episode, Story, User
 from klopnews.llm import make_llm
@@ -55,7 +55,14 @@ def render_story(st: Story, s: Settings, cat: dict, ticker: str = "") -> None:
     elif st.kind == "events":
         scene.lower = "Ссылки на все события — под видео"
     out = base / f"{st.id}.mp4"
-    if not st.reporter_script:
+    if st.kind == "weather":
+        w, city = st.data["weather"], st.data.get("city", "")
+        scene = studio.Scene(kind="weather", date_label=label, title=f"{city}, сегодня", weather=w,
+                             gear=weather.gear(w), tag="ПОГОДА", color=color, lower=f"{city}: {weather.summary(w)}",
+                             nameplate=("Клопик", f"прогноз погоды · {city}"), ticker=ticker, theme=theme)
+        st.duration = studio.render_segment(scene, synthesize(st.reporter_script, s.reporter_voice,
+                                                              s.reporter_instructions, s), out)
+    elif not st.reporter_script:
         st.duration = studio.render_segment(scene, _anchor_wav(st.script, s), out)
     else:
         a, b = base / f"{st.id}_a.mp4", base / f"{st.id}_b.mp4"
@@ -103,6 +110,8 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
             log.info("сюжет написан: [%s] %s", st.topic, st.headline)
         if "ai" in cat["topics"] and cat["events"] and not any(st.kind == "events" for st in have):
             afisha(db, s, cat, edition, now)
+        if "weather" in cat["topics"] and cat.get("weather") and not any(st.kind == "weather" for st in have):
+            forecast(db, s, cat, edition)
     todo = db.scalars(select(Story).where(Story.edition == edition, Story.status != "ready")
                       .order_by(Story.importance.desc())).all()
     tick = ticker_text(db.scalars(select(Story).where(Story.edition == edition)).all())
@@ -118,6 +127,17 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
     ed.status = "ready"
     db.commit()
     log.info("выпуск дня %s готов", edition)
+
+
+def forecast(db, s: Settings, cat: dict, edition: str) -> None:
+    """Погода от Клопика. Прогноз не скачался — выпуск выходит без неё."""
+    cfg = cat["weather"]
+    w = weather.fetch(cfg)
+    if not w:
+        return
+    db.add(editor.write_weather(make_llm(s), w, cfg.get("city", "Прага"), edition))
+    db.commit()
+    log.info("погода: %s", weather.summary(w))
 
 
 def afisha(db, s: Settings, cat: dict, edition: str, now: datetime) -> None:
@@ -141,7 +161,7 @@ def afisha(db, s: Settings, cat: dict, edition: str, now: datetime) -> None:
 
 def prefetch_audio(stories: list[Story], s: Settings, workers: int = 4) -> None:
     """Озвучка — сетевой запрос на 5–15 с, а рендер ждёт её по очереди. Заказываем всю разом в несколько потоков."""
-    jobs = [(st.script, s.anchor_voice, s.anchor_instructions) for st in stories]
+    jobs = [(st.script, s.anchor_voice, s.anchor_instructions) for st in stories if st.script]
     jobs += [(st.reporter_script, s.reporter_voice, s.reporter_instructions) for st in stories if st.reporter_script]
 
     def one(job):
@@ -175,13 +195,14 @@ def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]
     длиннее не больше чем на 20%. Мало новостей — выпуск честно короче.
     Короткий блок «Рынки» (индексы, акции дня, курсы) — всем, кто не отключил тему «Рынки и деньги»,
     и вне очереди: иначе важные сюжеты выедают время раньше него.
-    Порядок в выпуске: главные сюжеты, рынки, «ИИ в Праге», потом «коротко».
+    Погода от Клопика — тоже вне очереди и сразу после интро.
+    Порядок в выпуске: погода, главные сюжеты, рынки, «ИИ в Праге», потом «коротко».
     """
     muted = set(user.muted_sources or [])
     ok = [st for st in stories if st.status == "ready" and (not user.topics or st.topic in user.topics)
-          and (st.kind in ("markets", "events") or any(src["id"] not in muted for src in st.sources))]
+          and (st.kind in ("markets", "events", "weather") or any(src["id"] not in muted for src in st.sources))]
     chosen, used, seen, urls = [], 0.0, [], set()
-    for st in sorted(ok, key=lambda x: (x.kind != "markets", -x.importance)):
+    for st in sorted(ok, key=lambda x: (x.kind not in ("weather", "markets"), -x.importance)):
         keys, own = _key_words(st.headline), {src["url"] for src in st.sources}
         if any(len(keys & k) >= 2 for k in seen) or own & urls:  # то же событие другим сюжетом или в другой теме
             continue
@@ -190,7 +211,7 @@ def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]
             seen.append(keys)
             urls |= own
             used += st.duration
-    rank = {"story": 0, "markets": 1, "events": 2, "brief": 3}
+    rank = {"weather": -1, "story": 0, "markets": 1, "events": 2, "brief": 3}
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))
 
 
@@ -207,7 +228,8 @@ def intro_script(user: User, picked: list[Story], day: date | None = None) -> st
     theme = holidays.theme_for(day)
     if theme and theme.greeting:
         extra += " " + theme.greeting
-    return f"{greet}, {user.name}! В эфире Клоп Новости, с вами Клоп Александрович.{extra}{menu} Поехали!"
+    weather_first = " А сначала — погода от Клопика." if any(st.kind == "weather" for st in picked) else ""
+    return f"{greet}, {user.name}! В эфире Клоп Новости, с вами Клоп Александрович.{extra}{menu}{weather_first} Поехали!"
 
 
 def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:

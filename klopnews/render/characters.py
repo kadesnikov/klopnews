@@ -36,6 +36,9 @@ class Pen:
     def polygon(self, pts, fill):
         self.d.polygon([(x * SS, y * SS) for x, y in pts], fill=fill)
 
+    def pieslice(self, cx, cy, rx, ry, start, end, fill):
+        self.d.pieslice([(cx - rx) * SS, (cy - ry) * SS, (cx + rx) * SS, (cy + ry) * SS], start, end, fill=fill)
+
     def arc(self, cx, cy, rx, ry, start, end, fill, width):
         self.d.arc([(cx - rx) * SS, (cy - ry) * SS, (cx + rx) * SS, (cy + ry) * SS], start, end,
                    fill=fill, width=width * SS)
@@ -120,6 +123,38 @@ def costume(p: Pen, kind: str, cx: int, cy: int, r: int):
         p.circle(fx, fy, r * 0.08, (250, 204, 21))
 
 
+UMBRELLA, MITTEN, BEANIE = ((250, 204, 21), (59, 130, 246)), (59, 130, 246), (59, 130, 246)
+
+
+def weather_gear(p: Pen, gear: str, cx: int, cy: int, r: int, hat: bool, stage: str):
+    """Наряд по погоде. stage="back" — зонтик (за персонажем), "front" — очки, шапка, варежки поверх."""
+    items = set(gear.split("+")) if gear else set()
+    if stage == "back" and "umbrella" in items:
+        ux, uy = cx - 70, cy - r * 1.0  # купол над головой, ручка — в левую лапку
+        p.line([(ux, uy), (cx - 128, 445)], (60, 64, 72), 7)
+        for k in range(6):  # дольки купола в два цвета
+            p.pieslice(ux, uy + 30, 150, 75, 180 + k * 30, 210 + k * 30, UMBRELLA[k % 2])
+        p.circle(ux, uy - 46, 7, (60, 64, 72))
+        p.arc(cx - 140, 448, 14, 14, 0, 180, (60, 64, 72), 6)  # крючок ручки
+    if stage != "front":
+        return
+    if "sunglasses" in items:
+        ex, ey, er = r * 0.4, cy - r * 0.12, r * 0.29
+        for side in (-1, 1):
+            p.ellipse(cx + side * ex, ey, er * 1.3, er * 1.05, (60, 30, 70), outline=PINK, width=6)
+            p.arc(cx + side * ex - 4, ey - 2, er * 0.75, er * 0.6, 200, 270, WHITE, 5)  # блик
+        p.line([(cx - ex + er * 1.25, ey - 4), (cx + ex - er * 1.25, ey - 4)], PINK, 6)
+    if "winter" in items:
+        if not hat:  # праздничный колпак главнее
+            p.pieslice(cx, cy - r * 0.55, r * 0.95, r * 0.6, 180, 360, BEANIE)
+            p.ellipse(cx, cy - r * 0.58, r * 0.98, r * 0.13, WHITE)
+            p.circle(cx, cy - r * 1.18, r * 0.16, WHITE)
+        for mx in (cx - 128, cx + 128):  # варежки на лапках
+            p.ellipse(mx, 438, 26, 22, MITTEN)
+            p.ellipse(mx + (14 if mx > cx else -14), 426, 9, 12, MITTEN)
+            p.ellipse(mx, 452, 26, 6, WHITE)
+
+
 @lru_cache(maxsize=64)
 def anchor(mouth: int = 0, blink: bool = False, sway: int = 0, dress: str = "") -> Image.Image:
     """Клоп Александрович: божья коровка в белой рубашке и синем галстуке."""
@@ -137,10 +172,11 @@ def anchor(mouth: int = 0, blink: bool = False, sway: int = 0, dress: str = "") 
 
 
 @lru_cache(maxsize=64)
-def reporter(mouth: int = 0, blink: bool = False, sway: int = 0, dress: str = "") -> Image.Image:
+def reporter(mouth: int = 0, blink: bool = False, sway: int = 0, dress: str = "", gear: str = "") -> Image.Image:
     """Клопик: божья коровка с розовым бантиком, шарфиком и микрофоном."""
     img = Image.new("RGBA", (W * SS, H * SS), (0, 0, 0, 0))
     p, cx = Pen(img), W // 2
+    weather_gear(p, gear, cx, 190, 105, bool(dress), "back")
     _body(p, cx, 300)
     p.ellipse(cx, 300, 70, 22, PINK)  # шарфик
     _antennae(p, cx, 190, 105, sway)
@@ -155,4 +191,7 @@ def reporter(mouth: int = 0, blink: bool = False, sway: int = 0, dress: str = ""
     p.polygon([(mx - 26, my + 12), (mx + 26, my + 12), (mx + 22, my + 52), (mx - 22, my + 52)], PINK)
     p.circle(mx, my, 28, (90, 94, 104))
     p.ellipse(cx + 128, 440, 22, 18, BLACK)  # лапка
+    if "umbrella" in gear:
+        p.ellipse(cx - 128, 440, 22, 18, BLACK)  # вторая лапка держит зонтик
+    weather_gear(p, gear, cx, 190, 105, bool(dress), "front")
     return img.resize((W, H), Image.LANCZOS)
