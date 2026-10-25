@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from klopnews import feeds, markets
-from klopnews.db import Item, Story
+from klopnews.db import Item, Story, User
 from klopnews.llm import ask_json
 
 log = logging.getLogger(__name__)
@@ -148,7 +148,10 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
     used = {src["url"] for (srcs,) in db.execute(select(Story.sources).where(Story.edition < edition, Story.edition >= yday))
             for src in srcs}
     picked: list[tuple[str, dict]] = []
+    wanted = {t for (ts,) in db.execute(select(User.topics)) for t in ts or []}
     for topic, meta in cat["topics"].items():
+        if meta.get("optional") and topic not in wanted:  # тему по желанию никто не включил — не тратим на неё модель
+            continue
         items = [it for it in recent_items(db, sources, topic, since) if it.url not in used]
         if not items:
             log.warning("no items for topic %s", topic)

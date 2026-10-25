@@ -11,7 +11,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from klopnews import editor
-from klopnews.config import Settings, catalog
+from klopnews.config import Settings, catalog, optional_topics
 from klopnews.db import Edition, Episode, Story, User
 from klopnews.llm import make_llm
 from klopnews.render import studio
@@ -136,14 +136,16 @@ def _key_words(headline: str) -> set[str]:
             if w[:1].isupper() or any(c.isdigit() for c in w) or w.isascii() and w[:1].isalpha()}
 
 
-def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]:
+def pick_stories(user: User, stories: list[Story], budget: float, optional: frozenset = frozenset()) -> list[Story]:
     """Сюжеты под настройки человека, по важности, пока влезают в его длительность.
+
+    optional — темы по желанию: при «все темы» (пустой список) они не попадают.
 
     Порядок в выпуске: главные сюжеты, рынки, потом «коротко».
     """
     muted = set(user.muted_sources or [])
     ok = [st for st in stories if st.status == "ready"
-          and (not user.topics or st.topic in user.topics)
+          and (st.topic in user.topics if user.topics else st.topic not in optional)
           and (st.kind == "markets" or any(src["id"] not in muted for src in st.sources))]
     chosen, used, seen = [], 0.0, []
     for st in sorted(ok, key=lambda x: -x.importance):
@@ -169,7 +171,7 @@ def intro_script(user: User, picked: list[Story]) -> str:
 def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     cat = catalog()
     stories = db.scalars(select(Story).where(Story.edition == edition)).all()
-    picked = pick_stories(user, stories, user.minutes * 60 - 35)
+    picked = pick_stories(user, stories, user.minutes * 60 - 35, optional_topics(cat))
     if not picked:
         log.warning("nothing to show user=%s edition=%s", user.id, edition)
         return None

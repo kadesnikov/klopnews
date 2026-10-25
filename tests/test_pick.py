@@ -36,3 +36,10 @@ def test_same_event_twice_is_shown_once():
     stories[2].headline = "Maersk строит железнодорожную сеть во Вьетнаме"
     picked = pick_stories(User(topics=[], muted_sources=[]), stories, 600)
     assert [p.importance for p in picked] == [9, 7]
+
+
+def test_optional_topic_only_when_chosen():
+    stories = [st("ai", 6, 60), st("izhevsk", 9, 60)]
+    opt = frozenset({"izhevsk"})
+    assert [p.topic for p in pick_stories(User(topics=[], muted_sources=[]), stories, 600, opt)] == ["ai"]
+    assert [p.topic for p in pick_stories(User(topics=["ai", "izhevsk"], muted_sources=[]), stories, 600, opt)] == ["izhevsk", "ai"]
