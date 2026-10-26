@@ -91,3 +91,8 @@ def catalog(path: Path | None = None) -> dict:
         "sources": {s["id"]: s for s in raw["sources"]},
         "markets": raw.get("markets", []),
     }
+
+
+def optional_topics(cat: dict) -> frozenset:
+    """Темы по желанию: в выпуск — только тем, кто отметил их в настройках."""
+    return frozenset(tid for tid, t in cat["topics"].items() if t.get("optional"))
