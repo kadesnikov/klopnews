@@ -58,6 +58,13 @@ def test_markets_always_fit_and_same_article_twice_is_dropped():
     assert [p.kind for p in picked] == ["story", "markets"]
 
 
+def test_optional_topic_only_when_chosen():
+    stories = [st("ai", 6, 60), st("izhevsk", 9, 60)]
+    opt = frozenset({"izhevsk"})
+    assert [p.topic for p in pick_stories(User(topics=[], muted_sources=[]), stories, 600, opt)] == ["ai"]
+    assert [p.topic for p in pick_stories(User(topics=["ai", "izhevsk"], muted_sources=[]), stories, 600, opt)] == ["izhevsk", "ai"]
+
+
 def test_voice_only_what_fits_someones_episode():
     def new(topic, imp, words):
         x = st(topic, imp, 0)
@@ -70,3 +77,5 @@ def test_voice_only_what_fits_someones_episode():
     # по ~101 с на сюжет: 4 минуты — 205 с, с запасом 246 с и допуском +20% — 295 с: два ai влезают, третий — нет;
     # science не выбрал никто
     assert [x.headline for x in to_voice(users, stories, 1.2)] == ["ai9", "world9"]
+    # тему по желанию при «все темы» не озвучиваем
+    assert to_voice([User(topics=[], muted_sources=[], minutes=4)], [new("izhevsk", 9, 50)], 1.2, frozenset({"izhevsk"})) == []

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from klopnews import events, feeds, markets, weather
-from klopnews.db import Event, Item, Story
+from klopnews.db import Event, Item, Story, User
 from klopnews.llm import ask_json
 
 log = logging.getLogger(__name__)
@@ -215,9 +215,12 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
     # одна статья бывает в двух темах (Ars — и ИИ, и наука), одно событие — у разных источников разных тем:
     # что уже взято в выпуск, следующим темам не показываем и называем модели, чтобы не взяла его из другого источника
     taken = list(db.scalars(select(Story.headline).where(Story.edition == edition)))
+    wanted = {t for (ts,) in db.execute(select(User.topics)) for t in ts or []}
     for topic, meta in cat["topics"].items():
         if not any(topic in src["topics"] for src in sources.values()):
             continue  # у темы нет лент (погода) — её сюжет пишется отдельно
+        if meta.get("optional") and topic not in wanted:  # тему по желанию никто не включил — не тратим на неё модель
+            continue
         items = [it for it in recent_items(db, sources, topic, since) if it.url not in used]
         if not items:
             log.warning("no items for topic %s", topic)

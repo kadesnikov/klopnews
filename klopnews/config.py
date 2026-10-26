@@ -104,3 +104,8 @@ def catalog(path: Path | None = None) -> dict:
         "events": raw.get("events") or {},
         "weather": raw.get("weather") or {},
     }
+
+
+def optional_topics(cat: dict) -> frozenset:
+    """Темы по желанию: в выпуск — только тем, кто отметил их в настройках."""
+    return frozenset(tid for tid, t in cat["topics"].items() if t.get("optional"))

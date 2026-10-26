@@ -21,11 +21,11 @@
   </label>
   <fieldset>
     <legend>Темы</legend>
-    <p class="muted small">Ничего не выбрано — значит, все. «Рынки и деньги» — это ещё и короткая сводка индексов, акций дня и курсов валют.</p>
+    <p class="muted small">Ничего не выбрано — значит, все, кроме помеченных «по желанию». «Рынки и деньги» — это ещё и короткая сводка индексов, акций дня и курсов валют.</p>
     <div class="chips">
     {% for tid, t in topics.items() %}
-      <label class="chip"><input type="checkbox" name="topics" value="{{ tid }}" {% if not user.topics or tid in user.topics %}checked{% endif %}>
-        <span style="--c: {{ t.color }}">{{ t.title }}</span></label>
+      <label class="chip"><input type="checkbox" name="topics" value="{{ tid }}" {% if tid in user.topics or not user.topics and not t.optional %}checked{% endif %}>
+        <span style="--c: {{ t.color }}">{{ t.title }}{% if t.optional %} · по желанию{% endif %}</span></label>
     {% endfor %}
     </div>
   </fieldset>

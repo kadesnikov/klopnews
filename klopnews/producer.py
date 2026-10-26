@@ -11,7 +11,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from klopnews import editor, events, holidays, weather
-from klopnews.config import Settings, catalog
+from klopnews.config import Settings, catalog, optional_topics
 from klopnews.db import Edition, Episode, Story, User
 from klopnews.llm import make_llm
 from klopnews.render import studio
@@ -114,7 +114,7 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
         if "weather" in cat["topics"] and cat.get("weather") and not any(st.kind == "weather" for st in have):
             forecast(db, s, cat, edition)
     stories = db.scalars(select(Story).where(Story.edition == edition)).all()
-    todo = to_voice(db.scalars(select(User)).all(), stories, s.voice_margin)
+    todo = to_voice(db.scalars(select(User)).all(), stories, s.voice_margin, optional_topics(cat))
     log.info("озвучиваем %d сюжетов из %d: остальные не влезают ни в чей выпуск", len(todo), len(stories))
     render_stories(db, s, todo, stories)
     ed.status = "ready"
@@ -201,7 +201,8 @@ def estimate(st: Story) -> float:
     return len(f"{st.script} {st.reporter_script or ''}".split()) / 2.7 + 1
 
 
-def pick_stories(user: User, stories: list[Story], budget: float, planning: bool = False) -> list[Story]:
+def pick_stories(user: User, stories: list[Story], budget: float, optional: frozenset = frozenset(),
+                 planning: bool = False) -> list[Story]:
     """Сюжеты под настройки человека, по важности, примерно на его длительность.
 
     Длительность — ориентир, а не потолок: сюжет, который начинается до конца бюджета, берём, если выпуск выйдет
@@ -209,12 +210,13 @@ def pick_stories(user: User, stories: list[Story], budget: float, planning: bool
     Короткий блок «Рынки» (индексы, акции дня, курсы) — всем, кто не отключил тему «Рынки и деньги»,
     и вне очереди: иначе важные сюжеты выедают время раньше него.
     Погода от Клопика — тоже вне очереди и сразу после интро.
+    optional — темы по желанию: при «все темы» (пустой список) они не попадают.
     Порядок в выпуске: погода, главные сюжеты, рынки, «ИИ в Праге», потом «коротко».
     planning — ещё до озвучки: неозвученные тоже годятся, их длительность оценивается по тексту.
     """
     muted = set(user.muted_sources or [])
     ok = [st for st in stories if (st.status != "failed" if planning else st.status == "ready")
-          and (not user.topics or st.topic in user.topics)
+          and (st.topic in user.topics if user.topics else st.topic not in optional)
           and (st.kind in ("markets", "events", "weather") or any(src["id"] not in muted for src in st.sources))]
     chosen, used, seen, urls = [], 0.0, [], set()
     for st in sorted(ok, key=lambda x: (x.kind not in ("weather", "markets"), -x.importance)):
@@ -231,13 +233,14 @@ def pick_stories(user: User, stories: list[Story], budget: float, planning: bool
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))
 
 
-def to_voice(users: list[User], stories: list[Story], margin: float) -> list[Story]:
+def to_voice(users: list[User], stories: list[Story], margin: float, optional: frozenset = frozenset()) -> list[Story]:
     """Неозвученные сюжеты, которые попадут хоть к кому-то в выпуск.
 
     Озвучка — главный расход, а 40 сюжетов дня не нужны никому целиком. margin — запас по длительности:
     оценка по тексту неточная, а лишнее при склейке всё равно отрежется.
     """
-    need = {id(st) for u in users for st in pick_stories(u, stories, (u.minutes * 60 - FRAME) * margin, planning=True)}
+    need = {id(st) for u in users
+            for st in pick_stories(u, stories, (u.minutes * 60 - FRAME) * margin, optional, planning=True)}
     return [st for st in stories if id(st) in need and st.status == "new"]
 
 
@@ -261,9 +264,10 @@ def intro_script(user: User, picked: list[Story], day: date | None = None) -> st
 def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     cat = catalog()
     stories = db.scalars(select(Story).where(Story.edition == edition)).all()
-    if missing := to_voice([user], stories, s.voice_margin):  # новенький или поменял настройки после утренней сборки
+    optional = optional_topics(cat)
+    if missing := to_voice([user], stories, s.voice_margin, optional):  # новенький или поменял настройки после сборки
         render_stories(db, s, missing, stories)
-    picked = pick_stories(user, stories, user.minutes * 60 - FRAME)
+    picked = pick_stories(user, stories, user.minutes * 60 - FRAME, optional)
     if not picked:
         log.warning("nothing to show user=%s edition=%s", user.id, edition)
         return None
