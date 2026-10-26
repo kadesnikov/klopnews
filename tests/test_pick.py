@@ -1,5 +1,5 @@
 from klopnews.db import Story, User
-from klopnews.producer import intro_script, pick_stories
+from klopnews.producer import intro_script, pick_stories, to_voice
 
 
 def st(topic, imp, dur, kind="story", src="a"):
@@ -36,3 +36,16 @@ def test_same_event_twice_is_shown_once():
     stories[2].headline = "Maersk строит железнодорожную сеть во Вьетнаме"
     picked = pick_stories(User(topics=[], muted_sources=[]), stories, 600)
     assert [p.importance for p in picked] == [9, 7]
+
+
+def test_voice_only_what_fits_someones_episode():
+    def new(topic, imp, words):
+        x = st(topic, imp, 0)
+        x.status, x.script = "new", "слово " * words
+        return x
+
+    stories = [new("ai", 9, 270), new("ai", 8, 270), new("ai", 7, 270), new("world", 9, 270), new("science", 9, 270)]
+    stories[1].status, stories[1].duration = "ready", 100  # уже озвучен — второй раз не нужен
+    users = [User(topics=["ai"], muted_sources=[], minutes=4), User(topics=["world"], muted_sources=[], minutes=4)]
+    # по ~101 с на сюжет: в 4 минуты (205 с, с запасом 246 с) влезают два ai, третий — нет; science не выбрал никто
+    assert [x.headline for x in to_voice(users, stories, 1.2)] == ["ai9", "world9"]
