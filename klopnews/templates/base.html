@@ -13,7 +13,7 @@
 <body>
 <header class="top">
   <a class="logo" href="/"><img src="/static/favicon.svg" alt=""> <span>КЛОП<b>·НОВОСТИ</b></span></a>
-  <nav>{% if user %}<a href="/">Выпуски</a><a href="/settings">Настройки</a>{% elif bot %}<a href="https://t.me/{{ bot }}">Войти через Telegram</a>{% endif %}</nav>
+  <nav>{% if user %}<a href="/">Выпуски</a><a href="/settings">Настройки</a>{% if admin %}<a href="/admin">Админка</a>{% endif %}{% elif bot %}<a href="https://t.me/{{ bot }}">Войти через Telegram</a>{% endif %}</nav>
 </header>
 <main>{% block main %}{% endblock %}</main>
 <footer>

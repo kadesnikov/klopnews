@@ -2,6 +2,9 @@
 # Фид не открывается — он просто пропускается с предупреждением в логах.
 
 topics:
+  weather:
+    title: Погода
+    color: "#38bdf8"
   ai:
     title: ИИ и технологии
     color: "#3b82f6"
@@ -50,4 +53,62 @@ markets:
   - {symbol: "GC=F", name: "Золото", unit: "$"}
   - {symbol: "BZ=F", name: "Нефть Brent", unit: "$"}
   - {symbol: "BTC-USD", name: "Биткоин", unit: "$"}
-  - {symbol: "EURCZK=X", name: "EUR/CZK", digits: 3}
+  - {symbol: "EURCZK=X", name: "Евро в кронах", digits: 2}
+  - {symbol: "CZK=X", name: "Доллар в кронах", digits: 2}
+  - {symbol: "EURUSD=X", name: "EUR/USD", digits: 4}
+  - {symbol: "RUB=X", name: "Доллар в рублях", digits: 2}
+
+# Акции, за которыми следим: в выпуск попадают самые сильные движения дня, модель объясняет их по новостям.
+# group — как назвать сектор в эфире («неоклауды падают на фоне…»).
+movers:
+  - {symbol: NBIS, name: Nebius, group: неоклауды}
+  - {symbol: IREN, name: IREN, group: неоклауды}
+  - {symbol: CRWV, name: CoreWeave, group: неоклауды}
+  - {symbol: APLD, name: Applied Digital, group: неоклауды}
+  - {symbol: CIFR, name: Cipher Mining, group: неоклауды}
+  - {symbol: WULF, name: TeraWulf, group: неоклауды}
+  - {symbol: MSFT, name: Microsoft, group: гиперскейлеры}
+  - {symbol: AMZN, name: Amazon, group: гиперскейлеры}
+  - {symbol: GOOGL, name: Alphabet, group: гиперскейлеры}
+  - {symbol: META, name: Meta, group: гиперскейлеры}
+  - {symbol: ORCL, name: Oracle, group: гиперскейлеры}
+  - {symbol: NVDA, name: Nvidia, group: чипы}
+  - {symbol: AMD, name: AMD, group: чипы}
+  - {symbol: AVGO, name: Broadcom, group: чипы}
+  - {symbol: TSM, name: TSMC, group: чипы}
+  - {symbol: AAPL, name: Apple, group: бигтех}
+  - {symbol: TSLA, name: Tesla, group: бигтех}
+  - {symbol: PLTR, name: Palantir, group: бигтех}
+
+# Блок «ИИ в Праге»: митапы, лекции, хакатоны, конференции про ИИ на ближайшую неделю — у кого включена тема ИИ.
+# Сбор раз в день перед сюжетами; неизменившиеся страницы модель не перечитывает (до недели).
+# Блок выходит, когда нашлось новое, и по понедельникам — обзор недели.
+events:
+  city: Praha
+  timezone: Europe/Prague
+  # Страницы с афишей — читаются всегда (schema.org Event или просто текст)
+  pages:
+    - https://prague.aitinkerers.org/
+    - https://luma.com/prague  # городская афиша Luma: на ней почти все ИИ-митапы Праги
+  # Запросы в поиск (нужен BRAVE_API_KEY). Найденные страницы без слова об ИИ до модели не доходят
+  searches:
+    - AI meetup Prague
+    - umělá inteligence meetup Praha
+    - přednáška umělá inteligence Praha
+    - site:meetup.com Prague machine learning
+    - site:luma.com Prague AI
+    - site:luma.com Praha AI agents
+    # Agents 0.0.7 (Etnetera): OpenClaw Night Prague, Agents in Action Night Prague
+    - Agents in Action Night Prague
+    - OpenClaw Night Prague
+    - site:goout.net umělá inteligence Praha
+    - hackathon AI Prague
+    - Machine Learning Prague conference
+
+# Погода в начале выпуска — у кого включена тема «Погода». Прогноз Open-Meteo (без ключа), рассказывает Клопик,
+# одетая по погоде: зонтик, шапка с варежками, тёмные очки.
+weather:
+  city: Прага
+  lat: 50.08
+  lon: 14.42
+  timezone: Europe/Prague

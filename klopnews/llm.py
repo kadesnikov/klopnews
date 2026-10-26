@@ -41,10 +41,17 @@ class AnthropicLLM:
 
 class FakeLLM:
     def complete(self, system: str, user: str) -> str:
+        if '"afisha"' in system:
+            return json.dumps({"script": "На этой неделе в Праге есть куда сходить: митап про ИИ и лекция. Одобряю!"},
+                              ensure_ascii=False)
+        if '"found"' in system:
+            return json.dumps({"found": []})
         if '"events"' in system:
             n = len(re.findall(r"^\[\d+\]", user, re.M))
             return json.dumps({"events": [{"items": [i], "importance": 8 - i, "reporter_ok": i == 0}
                                           for i in range(min(n, 4))]})
+        if '"weather"' in system:
+            return json.dumps({"script": "В Праге сегодня прохладно, возьмите зонт. Клоп Александрович, в студию!"})
         if '"markets"' in system:
             return json.dumps({"script": "На рынках спокойно: индексы почти не изменились, золото держится у максимумов.",
                                "bullets": ["Индексы почти без изменений", "Золото у максимумов"]})

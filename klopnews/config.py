@@ -37,21 +37,26 @@ class Settings(BaseSettings):
         "Говори по-русски абсолютно без иностранного акцента, с естественными русскими интонациями и ударениями. "
         "Темп живой и бодрый, как в эфире: не растягивай слова, паузы короткие. Тёплый баритон, лёгкая ирония. "
         "Только названия компаний и продуктов латиницей (OpenAI, Apple) произноси как принято в русской речи. "
-        "О трагедиях — серьёзно и сдержанно."
+        "О трагедиях — серьёзно и сдержанно. Держи одну и ту же громкость, тембр и манеру от первой до последней "
+        "фразы, как будто весь выпуск читаешь одним дублем: без всплесков, шёпота и смены настроения."
     )
     reporter_voice: str = "marin"
     reporter_instructions: str = (
         "Ты — молодая российская телерепортёрша, носитель русского языка из Москвы, ведёшь прямое включение. "
         "Говори по-русски абсолютно без иностранного акцента, с естественными русскими интонациями. "
-        "Энергично, быстро, с азартом, но чётко. Названия латиницей произноси как принято в русской речи."
+        "Энергично, быстро, с азартом, но чётко. Названия латиницей произноси как принято в русской речи. "
+        "Держи одну и ту же громкость и манеру от первой до последней фразы, без всплесков и смены настроения."
     )
     voice_margin: float = 1.2  # озвучивать сюжетов на столько больше длительности выпусков (оценка длины неточная)
     reporter_enabled: bool = True
     reporters_per_edition: int = 2
 
+    brave_api_key: str = ""  # поиск ИИ-ивентов в Праге (как в piano-piano); пусто — только страницы-афиши
+
     telegram_bot_token: str = ""
     telegram_bot_username: str = ""
     allowed_telegram_ids: str = ""  # через запятую; пусто — пускать всех
+    admin_telegram_ids: str = ""  # кому открыта /admin (через запятую)
 
     edition_time: str = "05:30"  # когда собирать сюжеты дня (по timezone)
     default_delivery_time: str = "07:30"
@@ -61,6 +66,10 @@ class Settings(BaseSettings):
     @property
     def allowed_ids(self) -> set[int]:
         return {int(x) for x in self.allowed_telegram_ids.replace(" ", "").split(",") if x}
+
+    @property
+    def admin_ids(self) -> set[int]:
+        return {int(x) for x in self.admin_telegram_ids.replace(" ", "").split(",") if x}
 
     @property
     def media_dir(self) -> Path:
@@ -85,10 +94,13 @@ def settings() -> Settings:
 
 @lru_cache
 def catalog(path: Path | None = None) -> dict:
-    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...]}"""
+    """{'topics': {id: {...}}, 'sources': {id: {...}}, 'markets': [...], 'movers': [...], 'events': {city, pages, searches}, 'weather': {city, lat, lon}}"""
     raw = yaml.safe_load((path or settings().sources_file).read_text(encoding="utf-8"))
     return {
         "topics": raw["topics"],
         "sources": {s["id"]: s for s in raw["sources"]},
         "markets": raw.get("markets", []),
+        "movers": raw.get("movers", []),
+        "events": raw.get("events") or {},
+        "weather": raw.get("weather") or {},
     }

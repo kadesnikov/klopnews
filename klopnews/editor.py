@@ -4,14 +4,17 @@
 2. По каждому событию качаем полные тексты статей и пишем сюжет: главный (~1 мин) или «коротко» (~20 с).
 3. Пара лучших событий с конкретным местом получает прямое включение Клопика.
 4. Блок «Рынки» — по настоящим котировкам.
+5. Блок «ИИ в Праге» — по найденным ивентам (klopnews/events.py).
 """
 import logging
+import re
+import unicodedata
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from klopnews import feeds, markets
-from klopnews.db import Item, Story
+from klopnews import events, feeds, markets, weather
+from klopnews.db import Event, Item, Story
 from klopnews.llm import ask_json
 
 log = logging.getLogger(__name__)
@@ -57,10 +60,49 @@ REPORTER_NOTE = " Этот сюжет идёт с прямым включени�
 
 MARKETS = PERSONA + "\n\n" + RULES + """
 
-Сделай блок «Рынки» на 40–60 секунд (80–120 слов) по котировкам и финансовым новостям ниже.
-Цифры — только из таблицы котировок, проценты округляй до десятых. Объясни простыми словами, что двигало рынки,
-если это есть в новостях. Никаких инвестиционных советов.
+Сделай короткий блок «Рынки» на 30–40 секунд (65–90 слов) по котировкам и новостям ниже — быстро, только главное:
+1. Индексы: как сходили S&P 500, Nasdaq и DAX и что их двигало по новостям (ставка ФРС, отчёты компаний,
+   инфляция, пошлины…) — одна-две фразы.
+2. Самые заметные движения акций: называй сектор целиком, если акции движутся вместе («неоклауды Nebius и IREN
+   падают…», «гиперскейлеры растут…»), и причину, если она есть в новостях. Нет причины — не придумывай.
+3. Курс евро и доллара в кронах одной фразой.
+Цифры — только из таблиц, проценты округляй до десятых. Никаких инвестиционных советов.
 Формат: {"markets": true, "script": "текст для ведущего", "bullets": ["2–3 пункта для экрана"]}"""
+
+
+AFISHA = PERSONA + "\n\n" + RULES + """
+
+Сделай блок «ИИ в Праге» на 40–70 секунд (80–140 слов): какие события про искусственный интеллект будут в Праге
+на этой неделе. Только события из списка ниже, с их днями — не выдумывай ничего сверх списка. Самые интересные
+назови с днём и местом, остальные — одной фразой. Скажи, кому что подойдёт, если это понятно из описания.
+Можно одну фразу мнения Клопа. Время и адреса не диктуй целиком — ссылки на всё будут под видео.
+Формат: {"afisha": true, "script": "текст для ведущего"}"""
+
+
+WEATHER = PERSONA + "\n\n" + RULES + """
+
+Клопик ведёт прогноз погоды в начале выпуска: 30–45 слов от её лица, живо и по-дружески.
+Цифры — только из прогноза ниже. Дай практичный совет на день (зонт, тёплая шапка, тёмные очки, лёгкая куртка)
+и одной фразой скажи, во что она сама сегодня одета (наряд указан ниже). В конце передай слово в студию
+Клопу Александровичу.
+Формат: {"weather": true, "script": "текст Клопика"}"""
+
+OUTFIT = {"umbrella": "с зонтиком", "winter": "в шапке и варежках", "sunglasses": "в тёмных очках"}
+
+
+def write_weather(llm, w: dict, city: str, edition: str) -> Story:
+    """Прогноз от Клопика. Модель не ответила — говорит шаблон: погода важнее красоты слога."""
+    outfit = ", ".join(OUTFIT[g] for g in weather.gear(w).split("+") if g) or "как обычно, с бантиком"
+    line = weather.summary(w)
+    try:
+        script = str(ask_json(llm, WEATHER, f"{city}, сегодня: {line}. Наряд Клопика: {outfit}.")["script"])
+    except Exception as e:
+        log.error("weather_text_failed: %r", e)
+        script = (f"Погода в городе {city} на сегодня: {line.replace('…', ' до ').replace('°', ' градусов')}. "
+                  f"Я сегодня {outfit}. Клоп Александрович, передаю слово в студию!")
+    return Story(edition=edition, topic="weather", kind="weather", importance=7, headline=f"Погода: {city}, {line}",
+                 tag="ПОГОДА", script="", reporter_script=script, place=city, sources=[],
+                 data={"weather": w, "city": city})
 
 
 def recent_items(db, sources: dict, topic: str, since: datetime, limit: int = 60) -> list[Item]:
@@ -75,9 +117,12 @@ def blocked_by_filter(e: Exception) -> bool:
     return "content_filter" in str(e) or "high risk" in str(e)
 
 
-def select_events(llm, topic_title: str, items: list[Item], sources: dict, covered: list[str], n: int) -> list[dict]:
+def select_events(llm, topic_title: str, items: list[Item], sources: dict, covered: list[str], n: int,
+                  taken: list[str] = ()) -> list[dict]:
     lines = [f"[{i}] ({sources[it.source_id]['name']}) {it.title} — {it.summary[:200]}" for i, it in enumerate(items)]
     user = ("Уже были в эфире (не повторять, если нет нового развития): " + ("; ".join(covered) or "—")
+            + "\n\nУже взяты в сегодняшний выпуск в других темах (эти события не выбирай совсем, даже из других "
+            "источников): " + ("; ".join(taken) or "—")
             + "\n\nНовости:\n" + "\n".join(lines))
     try:
         events = ask_json(llm, SELECT.format(topic=topic_title, n=n), user).get("events", [])
@@ -89,8 +134,8 @@ def select_events(llm, topic_title: str, items: list[Item], sources: dict, cover
             return []
         # делим пополам, пока не отсеется новость, которая не нравится фильтру
         half = len(items) // 2
-        both = (select_events(llm, topic_title, items[:half], sources, covered, n)
-                + select_events(llm, topic_title, items[half:], sources, covered, n))
+        both = (select_events(llm, topic_title, items[:half], sources, covered, n, taken)
+                + select_events(llm, topic_title, items[half:], sources, covered, n, taken))
         return sorted(both, key=lambda e: -e["importance"])[:n]
     out = []
     for ev in events:
@@ -106,7 +151,7 @@ def write_story(llm, ev: dict, topic: str, sources: dict, edition: str, reporter
     parts, image = [], None
     for it in ev["items"][:3]:
         art = feeds.article(it.url) if len(parts) < 2 else {"text": "", "image": None}
-        image = image or it.image_url or art["image"]
+        image = image or art["image"] or it.image_url  # og:image крупнее картинки из RSS
         parts.append(f"Источник: {sources[it.source_id]['name']}\nЗаголовок: {it.title}\n"
                      f"Анонс: {it.summary}\nТекст: {art['text'] or '—'}")
     system = WRITE.format(length=(MAIN if main else BRIEF) + (REPORTER_NOTE if reporter else ""),
@@ -125,15 +170,34 @@ def write_story(llm, ev: dict, topic: str, sources: dict, edition: str, reporter
     )
 
 
-def write_markets(llm, quotes: list[dict], items: list[Item], edition: str) -> Story | None:
+def write_markets(llm, quotes: list[dict], stocks: list[dict], items: list[Item], edition: str) -> Story | None:
     if not quotes:
         return None
     table = "\n".join(f"{q['name']}: {markets.fmt_price(q)} ({markets.fmt_change(q)} за день)" for q in quotes)
-    news = "\n".join(f"- {it.title} — {it.summary[:200]}" for it in items[:15]) or "—"
-    d = ask_json(llm, MARKETS, f"Котировки:\n{table}\n\nФинансовые новости:\n{news}")
+    shares = "\n".join(f"{q['name']} ({q['symbol']}, {q['group']}): {markets.fmt_change(q)}"
+                       for q in sorted(stocks, key=lambda q: q["change_pct"])) or "—"
+    news = "\n".join(f"- {it.title} — {it.summary[:200]}" for it in items[:25]) or "—"
+    d = ask_json(llm, MARKETS, f"Котировки:\n{table}\n\nАкции (за день):\n{shares}\n\nНовости рынков и технологий:\n{news}")
     return Story(edition=edition, topic="finance", kind="markets", importance=7, headline="Рынки за день",
                  tag="РЫНКИ", bullets=[str(b)[:80] for b in d.get("bullets", [])][:3], script=str(d["script"]),
-                 sources=[], data={"quotes": quotes})
+                 sources=[], data={"quotes": quotes, "movers": markets.top_movers(stocks)})
+
+
+def no_emoji(text: str) -> str:
+    """В шрифте студии нет эмодзи — вместо 🦞 на экране был бы пустой квадрат."""
+    return re.sub(r"\s+", " ", "".join(c for c in text if unicodedata.category(c) not in ("So", "Cs", "Cn"))).strip()
+
+
+def write_events(llm, evs: list[Event], cfg: dict, edition: str) -> Story | None:
+    """Блок «ИИ в Праге». Даты на экране — из базы, модель только рассказывает."""
+    if not evs:
+        return None
+    listing = "\n".join(f"- {events.line(e, cfg)}. {e.summary}" for e in evs[:12])
+    d = ask_json(llm, AFISHA, f"События на неделю:\n{listing}")
+    sources = list({e.url: {"id": "events", "name": e.title[:80], "url": e.url} for e in evs if e.url}.values())
+    return Story(edition=edition, topic="ai", kind="events", importance=6, headline="ИИ в Праге: афиша недели",
+                 tag="АФИША", bullets=[no_emoji(f"{events.when(e, cfg).split(',')[0]} · {e.title}")[:80] for e in evs[:4]],
+                 script=str(d["script"]), place="Прага", sources=sources[:12], data={"events": [e.id for e in evs]})
 
 
 def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enabled: bool = True,
@@ -148,7 +212,12 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
     used = {src["url"] for (srcs,) in db.execute(select(Story.sources).where(Story.edition < edition, Story.edition >= yday))
             for src in srcs}
     picked: list[tuple[str, dict]] = []
+    # одна статья бывает в двух темах (Ars — и ИИ, и наука), одно событие — у разных источников разных тем:
+    # что уже взято в выпуск, следующим темам не показываем и называем модели, чтобы не взяла его из другого источника
+    taken = list(db.scalars(select(Story.headline).where(Story.edition == edition)))
     for topic, meta in cat["topics"].items():
+        if not any(topic in src["topics"] for src in sources.values()):
+            continue  # у темы нет лент (погода) — её сюжет пишется отдельно
         items = [it for it in recent_items(db, sources, topic, since) if it.url not in used]
         if not items:
             log.warning("no items for topic %s", topic)
@@ -156,8 +225,10 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
         # вчерашние и уже написанные сегодня (если сборка дописывает день): иначе одно событие придёт дважды
         covered = list(db.scalars(select(Story.headline).where(Story.edition.in_([yday, edition]), Story.topic == topic)))
         try:
-            events = select_events(llm, meta["title"], items, sources, covered, per_topic)
+            events = select_events(llm, meta["title"], items, sources, covered, per_topic, taken)
             picked += [(topic, ev) for ev in events]
+            used |= {it.url for ev in events for it in ev["items"]}
+            taken += [ev["items"][0].title for ev in events]
             log.info("тема %s: %d новостей → %d событий", topic, len(items), len(events))
         except Exception as e:
             log.error("select_failed %s: %r", topic, e)
@@ -178,7 +249,9 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
 
     if "finance" in cat["topics"] and cat["markets"] and not markets_done:
         try:
-            st = write_markets(llm, markets.fetch_quotes(cat["markets"]), recent_items(db, sources, "finance", since), edition)
+            news = recent_items(db, sources, "finance", since) + recent_items(db, sources, "ai", since, 10)
+            st = write_markets(llm, markets.fetch_quotes(cat["markets"]), markets.fetch_quotes(cat.get("movers", [])),
+                               news, edition)
             if st:
                 yield st
         except Exception as e:

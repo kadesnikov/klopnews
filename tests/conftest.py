@@ -9,6 +9,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "fake")
     monkeypatch.setenv("TTS_PROVIDER", "dummy")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
+    monkeypatch.setattr("klopnews.events.fetch", lambda client, url: None)  # афиши в тестах не качаем
+    monkeypatch.setattr("klopnews.weather.fetch", lambda cfg: None)  # и прогноз тоже
     config.settings.cache_clear()
     yield
     config.settings.cache_clear()
