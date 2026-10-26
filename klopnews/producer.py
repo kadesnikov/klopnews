@@ -11,7 +11,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from klopnews import editor, events, holidays, weather
-from klopnews.config import Settings, catalog
+from klopnews.config import Settings, catalog, optional_topics
 from klopnews.db import Edition, Episode, Story, User
 from klopnews.llm import make_llm
 from klopnews.render import studio
@@ -188,7 +188,7 @@ def _key_words(headline: str) -> set[str]:
             if w[:1].isupper() or any(c.isdigit() for c in w) or w.isascii() and w[:1].isalpha()}
 
 
-def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]:
+def pick_stories(user: User, stories: list[Story], budget: float, optional: frozenset = frozenset()) -> list[Story]:
     """Сюжеты под настройки человека, по важности, примерно на его длительность.
 
     Длительность — ориентир, а не потолок: сюжет, который начинается до конца бюджета, берём, если выпуск выйдет
@@ -196,10 +196,12 @@ def pick_stories(user: User, stories: list[Story], budget: float) -> list[Story]
     Короткий блок «Рынки» (индексы, акции дня, курсы) — всем, кто не отключил тему «Рынки и деньги»,
     и вне очереди: иначе важные сюжеты выедают время раньше него.
     Погода от Клопика — тоже вне очереди и сразу после интро.
+    optional — темы по желанию: при «все темы» (пустой список) они не попадают.
     Порядок в выпуске: погода, главные сюжеты, рынки, «ИИ в Праге», потом «коротко».
     """
     muted = set(user.muted_sources or [])
-    ok = [st for st in stories if st.status == "ready" and (not user.topics or st.topic in user.topics)
+    ok = [st for st in stories if st.status == "ready"
+          and (st.topic in user.topics if user.topics else st.topic not in optional)
           and (st.kind in ("markets", "events", "weather") or any(src["id"] not in muted for src in st.sources))]
     chosen, used, seen, urls = [], 0.0, [], set()
     for st in sorted(ok, key=lambda x: (x.kind not in ("weather", "markets"), -x.importance)):
@@ -235,7 +237,7 @@ def intro_script(user: User, picked: list[Story], day: date | None = None) -> st
 def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     cat = catalog()
     stories = db.scalars(select(Story).where(Story.edition == edition)).all()
-    picked = pick_stories(user, stories, user.minutes * 60 - 35)
+    picked = pick_stories(user, stories, user.minutes * 60 - 35, optional_topics(cat))
     if not picked:
         log.warning("nothing to show user=%s edition=%s", user.id, edition)
         return None

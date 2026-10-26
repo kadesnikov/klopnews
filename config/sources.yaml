@@ -20,6 +20,10 @@ topics:
   finance:
     title: Рынки и деньги
     color: "#f59e0b"
+  izhevsk:
+    title: Ижевск и Удмуртия
+    color: "#ec4899"
+    optional: true  # только тем, кто включил её сам; «все темы» её не включают
 
 sources:
   # ── ИИ и технологии ──
@@ -43,6 +47,10 @@ sources:
   # ── Рынки и деньги ──
   - {id: bloomberg, name: Bloomberg Markets, url: "https://feeds.bloomberg.com/markets/news.rss", topics: [finance]}
   - {id: marketwatch, name: MarketWatch, url: "https://feeds.content.dowjones.io/public/rss/mw_topstories", topics: [finance]}
+  # ── Ижевск и Удмуртия ──
+  - {id: susanin, name: Сусанин, url: "https://susanin.news/rss/", topics: [izhevsk]}
+  - {id: udminfo, name: Удмуртия Инфо, url: "https://udm-info.ru/rss/", topics: [izhevsk]}
+  - {id: izhlife, name: ИжЛайф, url: "https://www.izhlife.ru/rss.xml", topics: [izhevsk]}
   # CNBC (403 для серверов), РБК (не отвечает из Хельсинки), Yahoo Finance (RSS закрыт) убраны
 
 # Котировки для блока «Рынки» (Yahoo Finance). Цифры берутся отсюда, модель их только комментирует.

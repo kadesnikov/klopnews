@@ -56,3 +56,10 @@ def test_markets_always_fit_and_same_article_twice_is_dropped():
     stories[1].sources = stories[0].sources  # одна статья Ars в двух темах
     picked = pick_stories(User(topics=[], muted_sources=[]), stories, budget=115)
     assert [p.kind for p in picked] == ["story", "markets"]
+
+
+def test_optional_topic_only_when_chosen():
+    stories = [st("ai", 6, 60), st("izhevsk", 9, 60)]
+    opt = frozenset({"izhevsk"})
+    assert [p.topic for p in pick_stories(User(topics=[], muted_sources=[]), stories, 600, opt)] == ["ai"]
+    assert [p.topic for p in pick_stories(User(topics=["ai", "izhevsk"], muted_sources=[]), stories, 600, opt)] == ["izhevsk", "ai"]
