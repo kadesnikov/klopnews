@@ -20,7 +20,21 @@ RATE = 24000  # gpt-4o-mini-tts отдаёт 24 кГц моно
 
 
 def synthesize(text: str, voice: str, instructions: str, s: Settings) -> Path:
-    key = f"{s.tts_provider}|{s.tts_model}|{voice}|{instructions}|{s.tts_speed}|{text}"
+    raw = _raw(text, voice, instructions, s)
+    if abs(s.tts_speed - 1) <= 0.01:
+        return raw
+    # ускорение — от закэшированной озвучки: смена tts_speed не заказывает её заново
+    path = raw.with_name(f"{raw.stem}_x{s.tts_speed:g}.wav")
+    if not path.exists():
+        tmp = path.with_suffix(".part.wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(raw), "-filter:a", f"atempo={s.tts_speed}",
+                        "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(tmp)], check=True)
+        tmp.rename(path)
+    return path
+
+
+def _raw(text: str, voice: str, instructions: str, s: Settings) -> Path:
+    key = f"{s.tts_provider}|{s.tts_model}|{voice}|{instructions}|{text}"
     path = s.media_dir / "tts" / f"{hashlib.sha256(key.encode()).hexdigest()[:24]}.wav"
     if path.exists():
         return path
@@ -41,12 +55,6 @@ def synthesize(text: str, voice: str, instructions: str, s: Settings) -> Path:
                              "instructions": instructions, "response_format": "pcm"})
     r.raise_for_status()
     write_wav(tmp, np.frombuffer(r.content[: len(r.content) // 2 * 2], dtype="<i2").astype(np.float32) / 32768)
-    if abs(s.tts_speed - 1) > 0.01:
-        fast = path.with_suffix(".fast.wav")
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tmp), "-filter:a", f"atempo={s.tts_speed}",
-                        "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(fast)], check=True)
-        tmp.unlink()
-        tmp = fast
     tmp.rename(path)
     return path
 

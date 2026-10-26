@@ -84,6 +84,8 @@ def test_afisha_block_in_episode(monkeypatch):
     now = datetime(2026, 10, 20, 4, 0)
     with session() as db:
         db.add(Event(key="a", title="AI Tinkerers", starts_at=datetime(2026, 10, 23, 17), url="https://x/1"))
+        ai = User(tg_id=1, name="Маша", topics=["ai"], muted_sources=["verge"], minutes=10)
+        db.add(ai)  # озвучивается только то, что кто-то увидит
         db.commit()
         producer.build_edition(db, s, "2026-10-20", now)
         st = db.query(Story).filter(Story.kind == "events").one()
@@ -91,7 +93,6 @@ def test_afisha_block_in_episode(monkeypatch):
         producer.build_edition(db, s, "2026-10-20", now)  # перезапуск воркера — второго блока нет
         assert db.query(Story).filter(Story.kind == "events").count() == 1
         stories = db.query(Story).all()
-        ai = User(tg_id=1, name="Маша", topics=["ai"], muted_sources=["verge"], minutes=10)
         other = User(tg_id=2, name="Папа", topics=["finance"], minutes=10)
         assert st in producer.pick_stories(ai, stories, 600)
         assert st not in producer.pick_stories(other, stories, 600)

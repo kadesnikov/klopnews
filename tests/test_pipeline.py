@@ -112,6 +112,7 @@ def test_rerender_only_renders(monkeypatch):
     with session() as db:
         db.add(Item(source_id="verge", url="https://ex.com/1", title="Первая", summary="",
                     published_at=utcnow() - timedelta(hours=1)))
+        db.add(User(tg_id=7, name="Маша", topics=[], muted_sources=[], minutes=10))
         db.commit()
         with producer.build_lock(s):
             producer.build_edition(db, s, "2026-10-20", utcnow())
@@ -124,3 +125,23 @@ def test_rerender_only_renders(monkeypatch):
         with producer.build_lock(s):
             producer.build_edition(db, s, "2026-10-20", utcnow(), write=False)
         assert db.query(Story).count() == 1 and len(rendered) >= 1  # перерисовали, новых сюжетов не писали
+
+
+def test_unwatched_topics_are_voiced_only_on_demand(monkeypatch):
+    monkeypatch.setattr("klopnews.feeds.article", lambda url: {"text": "", "image": None})
+    monkeypatch.setattr("klopnews.markets.fetch_quotes", lambda ins: [])
+    s = settings()
+    with session() as db:
+        for i, src in enumerate(["verge", "irozhlas"]):
+            db.add(Item(source_id=src, url=f"https://ex.com/{i}", title=f"Новость {i}", summary="",
+                        published_at=utcnow() - timedelta(hours=1)))
+        db.add(User(tg_id=1, name="Маша", topics=["ai"], muted_sources=[], minutes=10))
+        db.commit()
+        producer.build_edition(db, s, "2026-10-20", utcnow())
+        assert {st.topic: st.status for st in db.query(Story).all()} == {"ai": "ready", "czech": "new"}
+
+        petr = User(tg_id=2, name="Петя", topics=["czech"], muted_sources=[], minutes=10, delivery_time="08:00")
+        db.add(petr)
+        db.commit()
+        ep = producer.assemble(db, s, petr, "2026-10-20")  # пришёл после утренней сборки — доозвучили его тему
+        assert ep and [c["topic"] for c in ep.chapters[1:]] == ["czech"]

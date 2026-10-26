@@ -1,7 +1,7 @@
 from datetime import date
 
 from klopnews.db import Story, User
-from klopnews.producer import intro_script, pick_stories
+from klopnews.producer import intro_script, pick_stories, to_voice
 
 
 def st(topic, imp, dur, kind="story", src="a"):
@@ -63,3 +63,19 @@ def test_optional_topic_only_when_chosen():
     opt = frozenset({"izhevsk"})
     assert [p.topic for p in pick_stories(User(topics=[], muted_sources=[]), stories, 600, opt)] == ["ai"]
     assert [p.topic for p in pick_stories(User(topics=["ai", "izhevsk"], muted_sources=[]), stories, 600, opt)] == ["izhevsk", "ai"]
+
+
+def test_voice_only_what_fits_someones_episode():
+    def new(topic, imp, words):
+        x = st(topic, imp, 0)
+        x.status, x.script = "new", "слово " * words
+        return x
+
+    stories = [new("ai", 9, 270), new("ai", 8, 270), new("ai", 7, 270), new("world", 9, 270), new("science", 9, 270)]
+    stories[1].status, stories[1].duration = "ready", 100  # уже озвучен — второй раз не нужен
+    users = [User(topics=["ai"], muted_sources=[], minutes=4), User(topics=["world"], muted_sources=[], minutes=4)]
+    # по ~101 с на сюжет: 4 минуты — 205 с, с запасом 246 с и допуском +20% — 295 с: два ai влезают, третий — нет;
+    # science не выбрал никто
+    assert [x.headline for x in to_voice(users, stories, 1.2)] == ["ai9", "world9"]
+    # тему по желанию при «все темы» не озвучиваем
+    assert to_voice([User(topics=[], muted_sources=[], minutes=4)], [new("izhevsk", 9, 50)], 1.2, frozenset({"izhevsk"})) == []
