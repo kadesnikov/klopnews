@@ -60,14 +60,15 @@ Yahoo Finance ─────► блок «Рынки»: цифры из кот
    Токен — в `.env`. *Public hostnames*: `news.sorpredente.com` → HTTP → `web:8000`. DNS Cloudflare пропишет сам.
 2. **Бот.** @BotFather → `/newbot` (например, `KlopNewsBot`), токен — в `.env`. Telegram ID семьи
    (у @userinfobot) — в `ALLOWED_TELEGRAM_IDS`.
-3. **`.env`:**
+3. **`.env`:** с `https://` в `PUBLIC_URL` сайт и воркер не запустятся, пока не заданы `SESSION_SECRET`
+   (не короче 32 символов) и `ALLOWED_TELEGRAM_IDS`.
    ```bash
    cp .env.example .env   # ключи Kimi и OpenAI, SESSION_SECRET, токены
    ssh root@204.168.241.143 'mkdir -p /opt/klopnews' && scp .env root@204.168.241.143:/opt/klopnews/.env
    ```
 4. **Деплой:** `./deploy.sh` вручную или merge в `main` (GitHub Actions; секреты `DEPLOY_SSH_KEY`,
    `DEPLOY_KNOWN_HOSTS` — те же, что у piano-piano).
-5. Каждый из семьи пишет боту `/start` → получает ссылку на настройки. `/now` — собрать выпуск сразу.
+5. Каждый из семьи пишет боту `/start` → получает ссылку на настройки. `/now` — собрать выпуск сразу (не чаще раза в 30 минут; админам — без ограничения).
 6. **Админка.** Свой Telegram ID — в `ADMIN_TELEGRAM_IDS`, боту — `/admin`: придёт ссылка на `/admin` (кто подключён, открывают ли выпуски, сколько досматривают, где бросают, как собрались сюжеты дня).
    Плеер на странице выпуска раз в 10 с сообщает, докуда досмотрели; переход по ссылке из бота засчитывается адресату.
 

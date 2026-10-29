@@ -55,13 +55,25 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_bot_username: str = ""
-    allowed_telegram_ids: str = ""  # через запятую; пусто — пускать всех
+    allowed_telegram_ids: str = ""  # через запятую; пусто — пускать всех (только без https, для разработки)
     admin_telegram_ids: str = ""  # кому открыта /admin (через запятую)
 
     edition_time: str = "05:30"  # когда собирать сюжеты дня (по timezone)
     default_delivery_time: str = "07:30"
     default_minutes: int = 10
     fetch_every_minutes: int = 120
+
+    def production_problems(self) -> list[str]:
+        """С чем нельзя запускаться на публичном адресе: сессию можно подделать, а бот — тратить деньги на кого угодно."""
+        if not self.public_url.startswith("https://"):
+            return []
+        out = []
+        if self.session_secret in ("", "dev-secret-change-me") or len(self.session_secret) < 32:
+            out.append("SESSION_SECRET is empty, default or shorter than 32 chars "
+                       "(python -c \"import secrets; print(secrets.token_urlsafe(32))\")")
+        if not self.allowed_ids:
+            out.append("ALLOWED_TELEGRAM_IDS is empty: any Telegram user could order episodes")
+        return out
 
     @property
     def allowed_ids(self) -> set[int]:
