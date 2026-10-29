@@ -85,6 +85,8 @@ def tick(s: Settings, last_fetch: float) -> float:
 def main() -> None:
     setup_logging()
     s = settings()
+    if problems := s.production_problems():
+        raise SystemExit("unsafe production config: " + "; ".join(problems))
     if not s.public_url.startswith("https://"):
         log.warning("PUBLIC_URL=%s — ссылки в Telegram будут без кнопки и не откроются снаружи", s.public_url)
     if s.telegram_bot_token:

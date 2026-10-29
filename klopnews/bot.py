@@ -1,6 +1,7 @@
 """Telegram: вход на сайт и уведомление «выпуск готов». Long polling — вебхук и домен для бота не нужны."""
 import logging
 import threading
+import time
 
 import httpx
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from klopnews.db import User, session
 
 log = logging.getLogger(__name__)
 LOGIN_TTL = 7 * 24 * 3600
+NOW_COOLDOWN = 30 * 60  # /now — не чаще раза в полчаса: каждый выпуск стоит денег (модель и озвучка)
+_last_now: dict[int, float] = {}
 
 
 def api(s: Settings, method: str, **params) -> dict:
@@ -56,6 +59,11 @@ def handle(s: Settings, msg: dict, make_now) -> None:
             db.add(user)
             db.commit()
         if text.startswith("/now"):
+            wait = _last_now.get(user.id, 0) + NOW_COOLDOWN - time.time()
+            if wait > 0 and user.tg_id not in s.admin_ids:
+                send(s, chat, f"Выпуск уже собирается или только что собран 🐞 Следующий — через {int(wait // 60) + 1} мин.")
+                return
+            _last_now[user.id] = time.time()
             send(s, chat, "Собираю выпуск под твои настройки, это пара минут… 🐞")
             threading.Thread(target=make_now, args=(user.id,), daemon=True).start()
         elif text.startswith("/admin") and user.tg_id in s.admin_ids:

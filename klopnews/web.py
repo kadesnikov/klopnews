@@ -1,5 +1,6 @@
 """Сайт: страница выпуска (открыта по ссылке — удобно делиться), список выпусков и настройки (по входу из бота)."""
 import re
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 
@@ -18,7 +19,16 @@ from klopnews.producer import date_label
 
 HERE = Path(__file__).parent
 SESSION_TTL = 180 * 24 * 3600
-app = FastAPI(title="Клоп·Новости", docs_url=None, redoc_url=None)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if problems := settings().production_problems():
+        raise RuntimeError("unsafe production config: " + "; ".join(problems))
+    yield
+
+
+app = FastAPI(title="Клоп·Новости", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 settings().media_dir.joinpath("episodes").mkdir(parents=True, exist_ok=True)
 app.mount("/media/episodes", StaticFiles(directory=settings().media_dir / "episodes"), name="episodes")
