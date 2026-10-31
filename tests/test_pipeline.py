@@ -1,5 +1,5 @@
 """Весь конвейер без сети: тестовые новости → сюжеты (fake LLM) → клипы (dummy TTS) → выпуск → страница."""
-from datetime import timedelta
+from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -47,12 +47,14 @@ def test_full_pipeline(monkeypatch):
     assert page.status_code == 200 and "Маша" in page.text and "включение Клопика" in page.text
     assert client.get("/settings", follow_redirects=False).status_code == 303
     client.get(f"/login?t={sign(user.id, 60, s.session_secret)}&next=/settings")
-    r = client.post("/settings", data={"name": "Мария", "minutes": "15", "delivery_time": "08:15",
+    week = {f"minutes_{i}": "7" for i in range(5)} | {"minutes_5": "15", "minutes_6": "20"}
+    r = client.post("/settings", data={"name": "Мария", "delivery_time": "08:15", **week,
                                        "topics": ["ai", "finance"], "sources": ["verge", "marketwatch"]})
-    assert r.status_code == 200
+    assert r.status_code == 200 and 'name="minutes_6"' in r.text
     with session() as db:
         u = db.get(User, user.id)
-        assert (u.name, u.minutes, u.delivery_time, u.topics) == ("Мария", 15, "08:15", ["ai", "finance"])
+        assert (u.name, u.week_minutes, u.delivery_time, u.topics) == ("Мария", [7] * 5 + [15, 20], "08:15", ["ai", "finance"])
+        assert u.minutes_on(date(2026, 11, 2)) == 7 and u.minutes_on(date(2026, 11, 7)) == 15  # пн и сб
         assert "verge" not in u.muted_sources and "irozhlas" in u.muted_sources
 
 

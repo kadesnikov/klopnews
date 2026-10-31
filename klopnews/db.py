@@ -1,6 +1,6 @@
 """SQLite: на семью из пяти человек больше не нужно. Веб и воркер — два процесса, поэтому WAL."""
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from functools import lru_cache
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event
@@ -23,9 +23,15 @@ class User(Base):
     topics: Mapped[list] = mapped_column(JSON, default=list)  # пусто — все темы
     muted_sources: Mapped[list] = mapped_column(JSON, default=list)
     minutes: Mapped[int] = mapped_column(Integer, default=10)
+    week_minutes: Mapped[list] = mapped_column(JSON, default=list)  # [пн..вс]; пусто — каждый день minutes
     delivery_time: Mapped[str] = mapped_column(String(5), default="07:30")
     birthday: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD: поздравить в интро
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def minutes_on(self, day: date) -> int:
+        """Длина выпуска в этот день недели: в будни можно покороче, в выходные подлиннее."""
+        week = self.week_minutes or []
+        return week[day.weekday()] if len(week) == 7 else self.minutes
 
 
 class Item(Base):
@@ -122,7 +128,7 @@ class View(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
-NEW_COLUMNS = [("users", "birthday", "VARCHAR(10)")]
+NEW_COLUMNS = [("users", "birthday", "VARCHAR(10)"), ("users", "week_minutes", "JSON")]
 
 
 @lru_cache

@@ -79,3 +79,16 @@ def test_voice_only_what_fits_someones_episode():
     assert [x.headline for x in to_voice(users, stories, 1.2)] == ["ai9", "world9"]
     # тему по желанию при «все темы» не озвучиваем
     assert to_voice([User(topics=[], muted_sources=[], minutes=4)], [new("izhevsk", 9, 50)], 1.2, frozenset({"izhevsk"})) == []
+
+
+def test_episode_length_depends_on_weekday():
+    from klopnews.web import week_label
+    u = User(topics=[], muted_sources=[], minutes=10, week_minutes=[5] * 5 + [20, 20])
+    mon, sat = date(2026, 11, 2), date(2026, 11, 7)
+    assert (u.minutes_on(mon), u.minutes_on(sat)) == (5, 20)
+    assert week_label(u) == "Пн–Пт 5 мин, Сб–Вс 20 мин"
+    assert User(minutes=10, week_minutes=[]).minutes_on(sat) == 10 and week_label(User(minutes=10)) == "10 мин"
+    stories = [st("ai", 9 - i, 0) for i in range(8)]
+    for x in stories:
+        x.status, x.script = "new", "слово " * 270  # ~100 с каждый
+    assert len(to_voice([u], stories, 1.0, day=mon)) < len(to_voice([u], stories, 1.0, day=sat))

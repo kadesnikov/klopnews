@@ -7,18 +7,26 @@
   <label class="field">Как к тебе обращаться
     <input name="name" value="{{ user.name }}" maxlength="80" required>
   </label>
+  <fieldset>
+    <legend>Длительность выпуска, минут</legend>
+    <p class="muted small">Примерно, для каждого дня недели: в будни можно покороче, в выходные — подлиннее.</p>
+    <div class="week">
+    {% for d in days %}{% set cur = user.week_minutes[loop.index0] if user.week_minutes and user.week_minutes|length == 7 else user.minutes %}
+      <label class="day{% if loop.index0 >= 5 %} weekend{% endif %}">{{ d }}
+        <select name="minutes_{{ loop.index0 }}" aria-label="{{ d }}, минут">{% for m in minute_choices %}<option value="{{ m }}" {% if m == cur %}selected{% endif %}>{{ m }}</option>{% endfor %}</select>
+      </label>
+    {% endfor %}
+    </div>
+  </fieldset>
   <div class="row">
-    <label class="field">Длительность выпуска, примерно
-      <select name="minutes">{% for m in [5, 7, 10, 15, 20] %}<option value="{{ m }}" {% if m == user.minutes %}selected{% endif %}>{{ m }} мин</option>{% endfor %}</select>
-    </label>
     <label class="field">Присылать в
       <input type="time" name="delivery_time" value="{{ user.delivery_time }}" required>
     </label>
+    <label class="field">День рождения
+      <input type="date" name="birthday" value="{{ user.birthday or '' }}">
+    </label>
   </div>
-  <label class="field">День рождения
-    <input type="date" name="birthday" value="{{ user.birthday or '' }}">
-    <span class="muted small">Клоп поздравит в начале выпуска. Год никто не узнает — возраст не называем.</span>
-  </label>
+  <p class="muted small" style="margin-top:-10px">Клоп поздравит в начале выпуска. Год никто не узнает — возраст не называем.</p>
   <fieldset>
     <legend>Темы</legend>
     <p class="muted small">Ничего не выбрано — значит, все, кроме помеченных «по желанию». «Рынки и деньги» — это ещё и короткая сводка индексов, акций дня и курсов валют.</p>

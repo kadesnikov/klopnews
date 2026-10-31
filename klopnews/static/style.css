@@ -68,6 +68,11 @@ code { background: var(--line); padding: 1px 6px; border-radius: 4px; }
 .field input, .field select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
                               background: var(--surface); color: var(--ink); }
 .row { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+.week { display: grid; gap: 6px; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-top: 8px; }
+.day { display: grid; gap: 4px; justify-items: center; font-weight: 600; font-size: 0.85rem; }
+.day.weekend { color: var(--accent); }
+.day select { font: inherit; font-size: 1rem; width: 100%; padding: 8px 0; border-radius: 10px; border: 1px solid var(--line);
+              background: var(--surface); color: var(--ink); text-align: center; text-align-last: center; appearance: none; }
 fieldset { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 14px; margin: 0; background: var(--surface); }
 legend { font-weight: 700; padding: 0 6px; }
 .group { margin-top: 10px; }

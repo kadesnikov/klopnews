@@ -35,6 +35,26 @@ app.mount("/media/episodes", StaticFiles(directory=settings().media_dir / "episo
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["mmss"] = lambda t: f"{int(t) // 60}:{int(t) % 60:02d}"
 templates.env.globals["date_label"] = date_label
+DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+MINUTES = [5, 7, 10, 15, 20]
+
+
+def week_label(user: User) -> str:
+    """«10 мин» или «Пн–Пт 7 мин, Сб–Вс 15 мин»: подряд идущие дни с одной длиной — одним отрезком."""
+    week = [user.minutes_on(date(2024, 1, 1 + i)) for i in range(7)]  # 1 января 2024 — понедельник
+    if len(set(week)) == 1:
+        return f"{week[0]} мин"
+    runs, i = [], 0
+    while i < 7:
+        j = i
+        while j + 1 < 7 and week[j + 1] == week[i]:
+            j += 1
+        runs.append((DAYS[i] if i == j else f"{DAYS[i]}–{DAYS[j]}") + f" {week[i]} мин")
+        i = j + 1
+    return ", ".join(runs)
+
+
+templates.env.globals.update(days=DAYS, minute_choices=MINUTES, week_label=week_label)
 templates.env.filters["pct"] = lambda x: "—" if x is None else f"{round(x * 100)}%"
 
 
@@ -161,7 +181,9 @@ async def save_settings(request: Request):
         if not user:
             return RedirectResponse("/", 303)
         user.name = str(form.get("name", "")).strip()[:80] or user.name
-        user.minutes = max(3, min(20, int(form.get("minutes") or user.minutes)))
+        default = int(form.get("minutes") or user.minutes)  # одно поле на всю неделю — старая форма
+        week = [max(3, min(20, int(form.get(f"minutes_{i}") or default))) for i in range(7)]
+        user.minutes, user.week_minutes = week[0], ([] if len(set(week)) == 1 else week)
         t = str(form.get("delivery_time", ""))
         user.delivery_time = t if len(t) == 5 and t[2] == ":" else user.delivery_time
         try:
