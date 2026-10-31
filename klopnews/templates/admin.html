@@ -36,7 +36,7 @@
     <tr>
       <td><b>{{ p.user.name }}</b><br><span class="muted small">с {{ p.user.created_at.strftime('%d.%m.%Y') }}</span></td>
       <td>{% for tp in p.user.topics or topics if tp in topics %}<span class="dot" style="background: {{ topics[tp].color }}" title="{{ topics[tp].title }}"></span>{% endfor %}</td>
-      <td class="num">{{ p.user.minutes }} мин · {{ p.user.delivery_time }}</td>
+      <td class="num">{{ week_label(p.user) }} · {{ p.user.delivery_time }}</td>
       <td class="num">{{ p.opened }} из {{ p.episodes }}</td>
       <td class="share">{% if p.share is not none %}<span class="meter"><i style="width: {{ (p.share * 100)|round }}%"></i></span> {{ p.share|pct }}{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="num">{{ p.last.strftime('%d.%m %H:%M') if p.last else "—" }}</td>

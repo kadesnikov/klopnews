@@ -114,7 +114,8 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
         if "weather" in cat["topics"] and cat.get("weather") and not any(st.kind == "weather" for st in have):
             forecast(db, s, cat, edition)
     stories = db.scalars(select(Story).where(Story.edition == edition)).all()
-    todo = to_voice(db.scalars(select(User)).all(), stories, s.voice_margin, optional_topics(cat))
+    todo = to_voice(db.scalars(select(User)).all(), stories, s.voice_margin, optional_topics(cat),
+                    date.fromisoformat(edition))
     log.info("озвучиваем %d сюжетов из %d: остальные не влезают ни в чей выпуск", len(todo), len(stories))
     render_stories(db, s, todo, stories)
     ed.status = "ready"
@@ -233,14 +234,16 @@ def pick_stories(user: User, stories: list[Story], budget: float, optional: froz
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))
 
 
-def to_voice(users: list[User], stories: list[Story], margin: float, optional: frozenset = frozenset()) -> list[Story]:
+def to_voice(users: list[User], stories: list[Story], margin: float, optional: frozenset = frozenset(),
+             day: date | None = None) -> list[Story]:
     """Неозвученные сюжеты, которые попадут хоть к кому-то в выпуск.
 
     Озвучка — главный расход, а 40 сюжетов дня не нужны никому целиком. margin — запас по длительности:
-    оценка по тексту неточная, а лишнее при склейке всё равно отрежется.
+    оценка по тексту неточная, а лишнее при склейке всё равно отрежется. day — день выпуска: от него зависит длина.
     """
     need = {id(st) for u in users
-            for st in pick_stories(u, stories, (u.minutes * 60 - FRAME) * margin, optional, planning=True)}
+            for st in pick_stories(u, stories, ((u.minutes_on(day) if day else u.minutes) * 60 - FRAME) * margin,
+                                   optional, planning=True)}
     return [st for st in stories if id(st) in need and st.status == "new"]
 
 
@@ -265,9 +268,10 @@ def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     cat = catalog()
     stories = db.scalars(select(Story).where(Story.edition == edition)).all()
     optional = optional_topics(cat)
-    if missing := to_voice([user], stories, s.voice_margin, optional):  # новенький или поменял настройки после сборки
+    day = date.fromisoformat(edition)
+    if missing := to_voice([user], stories, s.voice_margin, optional, day):  # новенький или поменял настройки после сборки
         render_stories(db, s, missing, stories)
-    picked = pick_stories(user, stories, user.minutes * 60 - FRAME, optional)
+    picked = pick_stories(user, stories, user.minutes_on(day) * 60 - FRAME, optional)
     if not picked:
         log.warning("nothing to show user=%s edition=%s", user.id, edition)
         return None
@@ -277,7 +281,6 @@ def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     db.flush()
     work = s.media_dir / "clips" / edition
     topics = [t for t in cat["topics"] if any(st.topic == t for st in picked)]
-    day = date.fromisoformat(edition)
     theme, birthday = holidays.theme_for(day), holidays.is_birthday(user.birthday, day)
     intro = studio.Scene(kind="studio", date_label=label,
                          title=f"С днём рождения, {user.name}!" if birthday else f"Привет, {user.name}!",

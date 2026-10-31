@@ -2,7 +2,7 @@
 {% block main %}
 {% if user %}
   <h1>Привет, {{ user.name }}!</h1>
-  <p class="muted">Новый выпуск каждый день в {{ user.delivery_time }}, примерно на {{ user.minutes }} мин. Ссылка придёт в Telegram.</p>
+  <p class="muted">Новый выпуск каждый день в {{ user.delivery_time }}, примерно {{ week_label(user) }}. Ссылка придёт в Telegram.</p>
   {% if episodes %}
   <ul class="episodes">
     {% for ep in episodes %}
