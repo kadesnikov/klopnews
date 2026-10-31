@@ -52,7 +52,9 @@ def parse(source_id: str, raw: bytes | str) -> list[dict]:
     return out
 
 
-TG_AD = re.compile(r"#реклам|\berid\b|^реклама\b", re.I | re.M)
+# Реклама и дайджесты (пересказ уже вышедших постов вперемешку с мировыми новостями) — мимо
+TG_SKIP = re.compile(r"#реклам|#дайджест|\berid\b|^реклама\b", re.I | re.M)
+_SEP = re.compile(r"^[_•·—=\-]{3,}$")
 _BG = re.compile(r"background-image:\s*url\(['\"]?([^'\")]+)")
 
 
@@ -60,9 +62,21 @@ def _cls(name: str) -> str:
     return f"contains(concat(' ', normalize-space(@class), ' '), ' {name} ')"
 
 
+def _more_link(div) -> str | None:
+    """Ссылка «Подробности: …» на полную статью на сайте канала (у The Česko — the-cesko.cz)."""
+    for a in div.iter("a"):
+        prev = a.getprevious()
+        before = (prev.tail if prev is not None else a.getparent().text) or ""
+        href = a.get("href", "")
+        if "одробн" in before[-40:] and href.startswith("http") and "//t.me/" not in href:
+            return href
+    return None
+
+
 def parse_telegram(source_id: str, raw: bytes | str) -> list[dict]:
     """Публичный канал Telegram: веб-версия t.me/s/<канал> — последние ~20 постов без ключей и бота.
-    Заголовка у поста нет — берём первую строку; полный текст поста идёт в анонс (статьи за ним нет)."""
+    Заголовок — первая строка поста, анонс — весь текст без подписи канала. Если в посте есть
+    «Подробности: <ссылка>», новость ведёт на статью (за полным текстом), иначе — на сам пост."""
     import lxml.html
 
     doc = lxml.html.fromstring(raw)
@@ -73,10 +87,17 @@ def parse_telegram(source_id: str, raw: bytes | str) -> list[dict]:
             continue
         for br in texts[0].iter("br"):
             br.tail = "\n" + (br.tail or "")
-        text = "\n".join(ln for ln in (re.sub(r"[ \t\xa0]+", " ", x).strip() for x in texts[0].text_content().split("\n")) if ln)
-        if not text or TG_AD.search(text):
+        full = [ln for ln in (re.sub(r"[ \t\xa0\u2800]+", " ", x).strip() for x in texts[0].text_content().split("\n")) if ln]
+        if TG_SKIP.search("\n".join(full)):  # пометка «Реклама в Pozor!®» стоит в подписи — смотрим весь пост
             continue
-        first = re.sub(r"^[^\w«\"(]+", "", text.split("\n")[0]).strip()  # без эмодзи-флажков в начале
+        cut = next((k for k, ln in enumerate(full) if _SEP.match(ln)), len(full))
+        lines = full[:cut]  # дальше подпись канала: «___ Pozor!® - новости…», «••• @the_cesko — …»
+        text = "\n".join(lines)
+        if not text:
+            continue
+        while lines and re.fullmatch(r"(#\w+\s*)+", lines[0]):  # строка из одних хэштегов — не заголовок
+            lines.pop(0)
+        first = re.sub(r"^[^\w«\"(]+", "", lines[0]).strip() if lines else ""  # без эмодзи в начале
         title = first if len(first) <= 200 else first[:200].rsplit(" ", 1)[0] + "…"
         if not title:
             continue
@@ -89,7 +110,7 @@ def parse_telegram(source_id: str, raw: bytes | str) -> list[dict]:
         published = datetime.fromisoformat(when[0]).astimezone(timezone.utc).replace(tzinfo=None) if when else utcnow()
         out.append({
             "source_id": source_id,
-            "url": f"https://t.me/{msg.get('data-post')}",
+            "url": _more_link(texts[0]) or f"https://t.me/{msg.get('data-post')}",
             "title": title[:500],
             "summary": text[:3000],
             "image_url": image,
