@@ -40,6 +40,9 @@ sources:
   - {id: irozhlas, name: iROZHLAS, url: "https://www.irozhlas.cz/rss/irozhlas", topics: [czech]}
   - {id: ct24, name: ČT24, url: "https://ct24.ceskatelevize.cz/rss/tema/vyber-redakce-84313", topics: [czech]}
   - {id: novinky, name: Novinky.cz, url: "https://www.novinky.cz/rss", topics: [czech]}
+  # Telegram-каналы: адрес t.me/s/<канал> — веб-версия канала, последние ~20 постов. Посты с #реклама пропускаются.
+  - {id: thecesko, name: The Česko, url: "https://t.me/s/the_cesko", topics: [czech]}
+  - {id: pozorbrno, name: "Pozor! Чехия", url: "https://t.me/s/pozor_brno", topics: [czech]}
   # ── Наука и космос ──
   - {id: nplus1, name: N + 1, url: "https://nplus1.ru/rss", topics: [science]}
   - {id: sciencealert, name: ScienceAlert, url: "https://www.sciencealert.com/feed", topics: [science]}

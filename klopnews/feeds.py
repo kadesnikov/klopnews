@@ -52,6 +52,52 @@ def parse(source_id: str, raw: bytes | str) -> list[dict]:
     return out
 
 
+TG_AD = re.compile(r"#реклам|\berid\b|^реклама\b", re.I | re.M)
+_BG = re.compile(r"background-image:\s*url\(['\"]?([^'\")]+)")
+
+
+def _cls(name: str) -> str:
+    return f"contains(concat(' ', normalize-space(@class), ' '), ' {name} ')"
+
+
+def parse_telegram(source_id: str, raw: bytes | str) -> list[dict]:
+    """Публичный канал Telegram: веб-версия t.me/s/<канал> — последние ~20 постов без ключей и бота.
+    Заголовка у поста нет — берём первую строку; полный текст поста идёт в анонс (статьи за ним нет)."""
+    import lxml.html
+
+    doc = lxml.html.fromstring(raw)
+    out = []
+    for msg in doc.xpath(f"//div[{_cls('tgme_widget_message')} and @data-post]"):
+        texts = msg.xpath(f".//div[{_cls('js-message_text')}]")  # не цитата из ответа (js-message_reply_text)
+        if not texts:
+            continue
+        for br in texts[0].iter("br"):
+            br.tail = "\n" + (br.tail or "")
+        text = "\n".join(ln for ln in (re.sub(r"[ \t\xa0]+", " ", x).strip() for x in texts[0].text_content().split("\n")) if ln)
+        if not text or TG_AD.search(text):
+            continue
+        first = re.sub(r"^[^\w«\"(]+", "", text.split("\n")[0]).strip()  # без эмодзи-флажков в начале
+        title = first if len(first) <= 200 else first[:200].rsplit(" ", 1)[0] + "…"
+        if not title:
+            continue
+        image = None
+        for el in msg.xpath(f".//a[{_cls('tgme_widget_message_photo_wrap')}] | .//i[{_cls('tgme_widget_message_video_thumb')}]"):
+            if m := _BG.search(el.get("style", "")):
+                image = m.group(1)
+                break
+        when = msg.xpath(f".//a[{_cls('tgme_widget_message_date')}]/time/@datetime")
+        published = datetime.fromisoformat(when[0]).astimezone(timezone.utc).replace(tzinfo=None) if when else utcnow()
+        out.append({
+            "source_id": source_id,
+            "url": f"https://t.me/{msg.get('data-post')}",
+            "title": title[:500],
+            "summary": text[:3000],
+            "image_url": image,
+            "published_at": published,
+        })
+    return out
+
+
 def fetch_all(sources: dict) -> int:
     """Скачать все фиды и сохранить новые новости. Возвращает число новых."""
     new = 0
@@ -60,7 +106,7 @@ def fetch_all(sources: dict) -> int:
             try:
                 r = client.get(src["url"])
                 r.raise_for_status()
-                items = parse(sid, r.content)
+                items = (parse_telegram if "://t.me/s/" in src["url"] else parse)(sid, r.content)
             except Exception as e:
                 log.warning("feed_failed %s: %r", sid, e)
                 continue
@@ -77,6 +123,8 @@ def fetch_all(sources: dict) -> int:
 
 def article(url: str, limit: int = 4000) -> dict:
     """Полный текст статьи и её картинка (og:image), чтобы сюжет был подробнее анонса из RSS."""
+    if url.startswith("https://t.me/"):  # пост из канала: весь текст уже в анонсе
+        return {"text": "", "image": None}
     try:
         import trafilatura
 
