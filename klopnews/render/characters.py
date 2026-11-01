@@ -123,7 +123,7 @@ def costume(p: Pen, kind: str, cx: int, cy: int, r: int):
         p.circle(fx, fy, r * 0.08, (250, 204, 21))
 
 
-UMBRELLA, MITTEN, BEANIE = ((250, 204, 21), (59, 130, 246)), (59, 130, 246), (59, 130, 246)
+UMBRELLA, MITTEN, BEANIE = ((255, 95, 162), (255, 140, 190)), (59, 130, 246), (59, 130, 246)  # зонтик розовый в крапинку
 
 
 def weather_gear(p: Pen, gear: str, cx: int, cy: int, r: int, hat: bool, stage: str):
@@ -134,6 +134,10 @@ def weather_gear(p: Pen, gear: str, cx: int, cy: int, r: int, hat: bool, stage: 
         p.line([(ux, uy), (cx - 128, 445)], (60, 64, 72), 7)
         for k in range(6):  # дольки купола в два цвета
             p.pieslice(ux, uy + 30, 150, 75, 180 + k * 30, 210 + k * 30, UMBRELLA[k % 2])
+        for f, n in ((0.4, 3), (0.75, 5)):  # белая крапинка
+            for k in range(n):
+                a = math.radians(180 + (k + 0.5) * 180 / n)
+                p.circle(ux + math.cos(a) * 150 * f, uy + 30 + math.sin(a) * 75 * f, 8, WHITE)
         p.circle(ux, uy - 46, 7, (60, 64, 72))
         p.arc(cx - 140, 448, 14, 14, 0, 180, (60, 64, 72), 6)  # крючок ручки
     if stage != "front":
