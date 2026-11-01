@@ -87,7 +87,7 @@ WEATHER = PERSONA + "\n\n" + RULES + """
 Клопу Александровичу.
 Формат: {"weather": true, "script": "текст Клопика"}"""
 
-OUTFIT = {"umbrella": "с зонтиком", "winter": "в шапке и варежках", "sunglasses": "в тёмных очках"}
+OUTFIT = {"umbrella": "с розовым зонтиком в белую крапинку", "winter": "в шапке и варежках", "sunglasses": "в тёмных очках"}
 
 
 def write_weather(llm, w: dict, city: str, edition: str) -> Story:
