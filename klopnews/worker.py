@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from klopnews import bot, feeds, producer
+from klopnews import bot, cleanup, feeds, producer
 from klopnews.config import Settings, catalog, settings, setup_logging
 from klopnews.db import Edition, Episode, User, session
 
@@ -91,12 +91,18 @@ def main() -> None:
         log.warning("PUBLIC_URL=%s — ссылки в Telegram будут без кнопки и не откроются снаружи", s.public_url)
     if s.telegram_bot_token:
         threading.Thread(target=bot.poll_forever, args=(s, make_now), daemon=True).start()
-    last_fetch = 0.0
+    last_fetch, cleaned = 0.0, ""
     while True:
         try:
             last_fetch = tick(s, last_fetch)
         except Exception as e:
             log.exception("tick_failed: %r", e)
+        if (today := local_now(s).date().isoformat()) != cleaned:
+            cleaned = today
+            try:
+                cleanup.cleanup_media(s.media_dir)
+            except Exception as e:
+                log.exception("cleanup_failed: %r", e)
         time.sleep(60)
 
 

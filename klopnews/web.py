@@ -100,7 +100,8 @@ def episode(request: Request, slug: str):
         if not ep:
             raise HTTPException(404, "Выпуск не найден")
         owner = db.get(User, ep.user_id)
-        return page(request, "episode.html", ep=ep, owner=owner, user=current_user(request, db))
+        available = (settings().media_dir / "episodes" / f"{ep.slug}.mp4").exists()  # старые чистит cleanup
+        return page(request, "episode.html", ep=ep, owner=owner, user=current_user(request, db), available=available)
 
 
 @app.post("/e/{slug}/watch", status_code=204)

@@ -10,6 +10,7 @@
 {% block main %}
 <h1>Выпуск на {{ date_label(ep.edition) }}</h1>
 <p class="muted">Для: {{ owner.name }} · {{ ep.duration|mmss }}</p>
+{% if available %}
 <div class="player">
   <video id="v" controls playsinline preload="metadata" poster="/media/episodes/{{ ep.slug }}.jpg"
          src="/media/episodes/{{ ep.slug }}.mp4"></video>
@@ -18,6 +19,9 @@
   <button class="btn" id="share" type="button">Поделиться</button>
   <a class="btn ghost" href="/media/episodes/{{ ep.slug }}.mp4" download>Скачать</a>
 </div>
+{% else %}
+<p class="card">Видео этого выпуска удалено: храним выпуски 90 дней. Сюжеты и ссылки на источники — ниже.</p>
+{% endif %}
 <ol class="chapters">
   {% for c in ep.chapters[1:] %}
   <li>
@@ -28,6 +32,7 @@
   </li>
   {% endfor %}
 </ol>
+{% if available %}
 <script>
   const v = document.getElementById("v");
   document.querySelectorAll("[data-t]").forEach(b => b.addEventListener("click", () => {
@@ -63,4 +68,5 @@
   v.addEventListener("ended", ping);
   document.addEventListener("visibilitychange", () => { if (document.hidden) ping(); });
 </script>
+{% endif %}
 {% endblock %}

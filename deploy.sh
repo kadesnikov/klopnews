@@ -27,6 +27,8 @@ ssh "$SERVER" "cd $REMOTE_DIR && mkdir -p data/backups && if [ -f data/klopnews.
 
 step "Сборка и запуск"
 ssh "$SERVER" "cd $REMOTE_DIR && docker compose up -d --build --remove-orphans"
+# старые образы и кэш сборки копятся с каждым деплоем (было 7.8 GB) — чистим всё старше недели
+ssh "$SERVER" "docker image prune -f >/dev/null; docker builder prune -af --filter until=168h >/dev/null" || true
 
 step "Проверка"
 for i in $(seq 1 12); do

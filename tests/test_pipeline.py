@@ -45,6 +45,11 @@ def test_full_pipeline(monkeypatch):
     client = TestClient(app)
     page = client.get(f"/e/{ep.slug}")
     assert page.status_code == 200 and "Маша" in page.text and "включение Клопика" in page.text
+    assert "<video" in page.text
+    video.rename(video.with_suffix(".bak"))  # выпуск старше 90 дней убрала ночная уборка
+    gone = client.get(f"/e/{ep.slug}")
+    assert gone.status_code == 200 and "<video" not in gone.text and "удалено" in gone.text
+    video.with_suffix(".bak").rename(video)
     assert client.get("/settings", follow_redirects=False).status_code == 303
     client.get(f"/login?t={sign(user.id, 60, s.session_secret)}&next=/settings")
     week = {f"minutes_{i}": "7" for i in range(5)} | {"minutes_5": "15", "minutes_6": "20"}
