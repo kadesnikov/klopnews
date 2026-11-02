@@ -1,8 +1,9 @@
 # Тесты на каждый pull request; после merge в main — тесты и деплой на сервер (как в piano-piano).
 # Секреты репозитория (Settings → Secrets and variables → Actions):
+#   TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET — OAuth-клиент Tailscale (Auth Keys: Write, тег tag:ci)
 #   DEPLOY_SSH_KEY      — приватный ключ деплоя (можно тот же, что у piano-piano)
-#   DEPLOY_KNOWN_HOSTS  — вывод `ssh-keyscan 204.168.241.143`
-# Необязательная переменная (вкладка Variables): DEPLOY_SERVER — по умолчанию root@204.168.241.143
+#   DEPLOY_KNOWN_HOSTS  — вывод `ssh-keyscan <tailscale-IP сервера 100.x.x.x>`
+# Необязательная переменная (вкладка Variables): DEPLOY_SERVER — root@<tailscale-IP сервера> (публичный SSH закрыт)
 name: tests-and-deploy
 
 on:
@@ -34,6 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Tailscale (порт 22 закрыт снаружи, сервер доступен только через tailnet)
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
       - name: Ключ деплоя
         env:
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
