@@ -69,6 +69,17 @@ MARKETS = PERSONA + "\n\n" + RULES + """
 Цифры — только из таблиц, проценты округляй до десятых. Никаких инвестиционных советов.
 Формат: {"markets": true, "script": "текст для ведущего", "bullets": ["2–3 пункта для экрана"]}"""
 
+# В выходные биржи закрыты: вчерашние котировки — те же, что в прошлом выпуске. Вместо цифр — новости и ожидания.
+MARKETS_WEEKEND = PERSONA + "\n\n" + RULES + """
+
+Сегодня выходной, биржи закрыты, свежих котировок нет. Сделай короткий блок «Рынки» на 30–40 секунд (65–90 слов)
+по новостям ниже:
+1. Главное, что обсуждают на рынках: компании, сектора, ставки, пошлины, крипта — одна-две темы.
+2. Чего ждать на неделе: отчёты компаний, заседания центробанков, важная статистика — только если это есть
+   в новостях.
+Никаких цифр котировок и процентов изменения, кроме тех, что прямо есть в новостях. Никаких инвестиционных советов.
+Формат: {"markets": true, "script": "текст для ведущего", "bullets": ["2–3 пункта для экрана"]}"""
+
 
 AFISHA = PERSONA + "\n\n" + RULES + """
 
@@ -191,13 +202,23 @@ def write_story(llm, ev: dict, topic: str, sources: dict, edition: str, reporter
 
 
 def write_markets(llm, quotes: list[dict], stocks: list[dict], items: list[Item], edition: str) -> Story | None:
+    """Блок «Рынки». В выходные — без котировок: только новости рынков и ожидания на неделю."""
+    news = "\n".join(f"- {it.title} — {it.summary[:200]}" for it in items[:25]) or "—"
+    if datetime.fromisoformat(edition).weekday() >= 5:
+        if not items:
+            return None
+        d = ask_json(llm, MARKETS_WEEKEND, f"Новости рынков и технологий:\n{news}")
+        return Story(edition=edition, topic="finance", kind="markets", importance=7, headline="Рынки: взгляд на неделю",
+                     tag="РЫНКИ", bullets=[str(b)[:80] for b in d.get("bullets", [])][:3], script=str(d["script"]),
+                     sources=[], data={})
     if not quotes:
         return None
+    # утром в понедельник последние торги — пятничные, и в выходные о них не рассказывали
+    session = "в пятницу" if datetime.fromisoformat(edition).weekday() == 0 else "вчера"
     table = "\n".join(f"{q['name']}: {markets.fmt_price(q)} ({markets.fmt_change(q)} за день)" for q in quotes)
     shares = "\n".join(f"{q['name']} ({q['symbol']}, {q['group']}): {markets.fmt_change(q)}"
                        for q in sorted(stocks, key=lambda q: q["change_pct"])) or "—"
-    news = "\n".join(f"- {it.title} — {it.summary[:200]}" for it in items[:25]) or "—"
-    d = ask_json(llm, MARKETS, f"Котировки:\n{table}\n\nАкции (за день):\n{shares}\n\nНовости рынков и технологий:\n{news}")
+    d = ask_json(llm, MARKETS, f"Последние торги были {session}.\n\nКотировки:\n{table}\n\nАкции (за день):\n{shares}\n\nНовости рынков и технологий:\n{news}")
     return Story(edition=edition, topic="finance", kind="markets", importance=7, headline="Рынки за день",
                  tag="РЫНКИ", bullets=[str(b)[:80] for b in d.get("bullets", [])][:3], script=str(d["script"]),
                  sources=[], data={"quotes": quotes, "movers": markets.top_movers(stocks)})

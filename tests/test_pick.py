@@ -65,6 +65,16 @@ def test_optional_topic_only_when_chosen():
     assert [p.topic for p in pick_stories(User(topics=["ai", "izhevsk"], muted_sources=[]), stories, 600, opt)] == ["izhevsk", "ai"]
 
 
+def test_each_chosen_topic_gets_a_story():
+    stories = [st("world", 9, 60), st("world", 8, 60), st("czech", 8, 60), st("izhevsk", 4, 20, "brief")]
+    opt = frozenset({"izhevsk"})
+    user = User(topics=["world", "czech", "izhevsk"], muted_sources=[])
+    # 150 с: по важности влезли бы только мир и Чехия, но Удмуртию выбрали сами — её сюжет не вытесняется
+    assert [p.headline for p in pick_stories(user, stories, 150, opt)] == ["world9", "czech8", "izhevsk4"]
+    # при «все темы» гарантии нет: берём просто самое важное
+    assert [p.headline for p in pick_stories(User(topics=[], muted_sources=[]), stories[:3], 120)] == ["world9", "world8"]
+
+
 def test_voice_only_what_fits_someones_episode():
     def new(topic, imp, words):
         x = st(topic, imp, 0)
