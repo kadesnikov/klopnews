@@ -111,3 +111,11 @@ def test_episode_length_depends_on_weekday():
     for x in stories:
         x.status, x.script = "new", "слово " * 270  # ~100 с каждый
     assert len(needed([u], stories, 1.0, day=mon)) < len(needed([u], stories, 1.0, day=sat))
+
+
+def test_chosen_topic_gets_its_draft_written():
+    drafts = [st("world", 9 - i, 0) for i in range(8)] + [st("izhevsk", 3, 0, "brief")]
+    for x in drafts:
+        x.status = "draft"
+    u = User(topics=["world", "izhevsk"], muted_sources=[], minutes=4)
+    assert "izhevsk" in {x.topic for x in needed([u], drafts, 1.4)}  # мировые не вытесняют Удмуртию и до текста
