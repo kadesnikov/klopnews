@@ -157,6 +157,26 @@ def select_events(llm, topic_title: str, items: list[Item], sources: dict, cover
     return sorted(out, key=lambda e: -e["importance"])[:n]
 
 
+def draft_story(ev: dict, topic: str, sources: dict, edition: str, reporter: bool) -> Story:
+    """Событие без текста: модель пишет его, только когда сюжет попадает хоть к кому-то в выпуск (write_draft)."""
+    return Story(
+        edition=edition, topic=topic, kind="story" if ev["importance"] >= 6 or reporter else "brief",
+        importance=ev["importance"], headline=ev["items"][0].title[:300], script="", status="draft",
+        sources=[{"id": it.source_id, "name": sources[it.source_id]["name"], "url": it.url} for it in ev["items"]],
+        image_url=ev["items"][0].image_url, data={"items": [it.id for it in ev["items"]], "reporter": reporter},
+    )
+
+
+def write_draft(db, llm, st: Story, sources: dict) -> None:
+    """Текст черновика по полным статьям — так же, как раньше писались все события дня."""
+    by_id = {it.id: it for it in db.scalars(select(Item).where(Item.id.in_(st.data["items"])))}
+    ev = {"items": [by_id[i] for i in st.data["items"] if i in by_id], "importance": st.importance}
+    full = write_story(llm, ev, st.topic, sources, st.edition, st.data.get("reporter", False))
+    for f in ("kind", "headline", "tag", "bullets", "script", "reporter_script", "place", "image_url"):
+        setattr(st, f, getattr(full, f))
+    st.status = "new"
+
+
 def write_story(llm, ev: dict, topic: str, sources: dict, edition: str, reporter: bool) -> Story:
     main = ev["importance"] >= 6 or reporter
     parts, image = [], None
@@ -223,9 +243,9 @@ def write_events(llm, evs: list[Event], cfg: dict, edition: str) -> Story | None
 
 def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enabled: bool = True,
                   reporters: int = 2, per_topic: int = 8, done_urls: frozenset = frozenset(), markets_done: bool = False):
-    """Тексты сюжетов дня (без озвучки), по одному — чтобы сохранять сразу.
+    """Сюжеты дня по одному — чтобы сохранять сразу: события — черновиками без текста (draft_story), рынки — целиком.
 
-    Ошибка в одном сюжете не валит выпуск. done_urls — события, уже написанные до перезапуска.
+    Ошибка в одном сюжете не валит выпуск. done_urls — события, уже сохранённые до перезапуска.
     """
     sources, since = cat["sources"], now - timedelta(hours=30)
     yday = (datetime.fromisoformat(edition) - timedelta(days=1)).date().isoformat()
@@ -264,12 +284,8 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
         report_ids = {id(p[1]) for p in cands[:reporters]}
 
     for topic, ev in picked:
-        if any(it.url in done_urls for it in ev["items"]):
-            continue
-        try:
-            yield write_story(llm, ev, topic, sources, edition, id(ev) in report_ids)
-        except Exception as e:
-            log.error("write_failed %s: %r", ev["items"][0].title, e)
+        if not any(it.url in done_urls for it in ev["items"]):
+            yield draft_story(ev, topic, sources, edition, id(ev) in report_ids)
 
     if "finance" in cat["topics"] and cat["markets"] and not markets_done:
         try:

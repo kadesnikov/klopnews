@@ -1,7 +1,7 @@
 from datetime import date
 
 from klopnews.db import Story, User
-from klopnews.producer import intro_script, pick_stories, to_voice
+from klopnews.producer import intro_script, needed, pick_stories
 
 
 def st(topic, imp, dur, kind="story", src="a"):
@@ -86,9 +86,18 @@ def test_voice_only_what_fits_someones_episode():
     users = [User(topics=["ai"], muted_sources=[], minutes=4), User(topics=["world"], muted_sources=[], minutes=4)]
     # по ~101 с на сюжет: 4 минуты — 205 с, с запасом 246 с и допуском +20% — 295 с: два ai влезают, третий — нет;
     # science не выбрал никто
-    assert [x.headline for x in to_voice(users, stories, 1.2)] == ["ai9", "world9"]
-    # тему по желанию при «все темы» не озвучиваем
-    assert to_voice([User(topics=[], muted_sources=[], minutes=4)], [new("izhevsk", 9, 50)], 1.2, frozenset({"izhevsk"})) == []
+    assert [x.headline for x in needed(users, stories, 1.2)] == ["ai9", "ai8", "world9"]
+    # тему по желанию при «все темы» не берём
+    assert needed([User(topics=[], muted_sources=[], minutes=4)], [new("izhevsk", 9, 50)], 1.2, frozenset({"izhevsk"})) == []
+
+
+def test_drafts_are_planned_by_estimated_length():
+    drafts = [st("ai", 9 - i, 0, "story" if i < 4 else "brief") for i in range(8)]
+    for x in drafts:
+        x.status = "draft"  # главный ~49 с, «коротко» ~18 с
+    # 5 минут — 265 с: пять главных не влезают даже с допуском +20% (318 с), зато влезают «коротко»
+    picked = needed([User(topics=[], muted_sources=[], minutes=5)], drafts, 1.0)
+    assert [x.kind for x in picked] == ["story"] * 4 + ["brief"] * 4
 
 
 def test_episode_length_depends_on_weekday():
@@ -101,4 +110,12 @@ def test_episode_length_depends_on_weekday():
     stories = [st("ai", 9 - i, 0) for i in range(8)]
     for x in stories:
         x.status, x.script = "new", "слово " * 270  # ~100 с каждый
-    assert len(to_voice([u], stories, 1.0, day=mon)) < len(to_voice([u], stories, 1.0, day=sat))
+    assert len(needed([u], stories, 1.0, day=mon)) < len(needed([u], stories, 1.0, day=sat))
+
+
+def test_chosen_topic_gets_its_draft_written():
+    drafts = [st("world", 9 - i, 0) for i in range(8)] + [st("izhevsk", 3, 0, "brief")]
+    for x in drafts:
+        x.status = "draft"
+    u = User(topics=["world", "izhevsk"], muted_sources=[], minutes=4)
+    assert "izhevsk" in {x.topic for x in needed([u], drafts, 1.4)}  # мировые не вытесняют Удмуртию и до текста
