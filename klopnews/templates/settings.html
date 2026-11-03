@@ -29,11 +29,11 @@
   <p class="muted small" style="margin-top:-10px">Клоп поздравит в начале выпуска. Год никто не узнает — возраст не называем.</p>
   <fieldset>
     <legend>Темы</legend>
-    <p class="muted small">Ничего не выбрано — значит, все, кроме помеченных «по желанию». «Рынки и деньги» — это ещё и короткая сводка индексов, акций дня и курсов валют.</p>
+    <p class="muted small">Ничего не выбрано — значит, все{% for tid, t in topics.items() if t.optional %}{% if loop.first %}, кроме{% endif %} «{{ t.title }}»{% if not loop.last %},{% endif %}{% endfor %}. «Рынки и деньги» — это ещё и короткая сводка индексов, акций дня и курсов валют.</p>
     <div class="chips">
     {% for tid, t in topics.items() %}
       <label class="chip"><input type="checkbox" name="topics" value="{{ tid }}" {% if tid in user.topics or not user.topics and not t.optional %}checked{% endif %}>
-        <span style="--c: {{ t.color }}">{{ t.title }}{% if t.optional %} · по желанию{% endif %}</span></label>
+        <span style="--c: {{ t.color }}">{{ t.title }}</span></label>
     {% endfor %}
     </div>
   </fieldset>

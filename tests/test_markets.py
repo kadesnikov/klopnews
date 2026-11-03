@@ -51,3 +51,24 @@ def test_weather_gear_and_summary():
                                     "precipitation_probability_max": [None], "precipitation_sum": [0.0],
                                     "wind_speed_10m_max": [18.0]}}) == \
         {"tmin": 6, "tmax": 15, "code": 3, "rain_prob": 0, "rain_mm": 0.0, "wind": 5}
+
+
+def test_weekend_markets_without_quotes():
+    from klopnews.db import Item
+    from klopnews.editor import write_markets
+
+    class LLM:
+        def complete(self, system, user):
+            self.system, self.user = system, user
+            return '{"markets": true, "script": "Биржи отдыхают.", "bullets": ["На неделе — отчёт Nvidia"]}'
+
+    q = [{"name": "S&P 500", "symbol": "^GSPC", "price": 6000.0, "change_pct": 0.5}]
+    news = [Item(title="Nvidia отчитается в среду", summary="")]
+    llm = LLM()
+    sat = write_markets(llm, q, [], news, "2026-11-07")
+    assert sat.headline == "Рынки: взгляд на неделю" and sat.data == {} and "S&P" not in llm.user
+    assert write_markets(llm, q, [], [], "2026-11-08") is None  # воскресенье без новостей — блока нет
+    mon = write_markets(llm, q, [], news, "2026-11-09")
+    assert mon.data["quotes"] and "Последние торги были в пятницу" in llm.user
+    write_markets(llm, q, [], news, "2026-11-10")
+    assert "Последние торги были вчера" in llm.user
