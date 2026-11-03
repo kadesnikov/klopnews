@@ -91,7 +91,7 @@ def build_lock(s: Settings):
 
 
 def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = True) -> None:
-    """Тексты всех сюжетов дня; озвучка и клипы — тех, что войдут хоть в чей-то выпуск. Вызывать под build_lock.
+    """События дня; тексты, озвучка и клипы — тех, что войдут хоть в чей-то выпуск. Вызывать под build_lock.
 
     Повторный вызов (после перезапуска воркера) не переписывает готовое: дописывает новые события и рендерит недостающее.
     write=False — только озвучить и отрендерить то, что не готово (rerender).
@@ -108,19 +108,42 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
                                        done_urls=done, markets_done=any(st.kind == "markets" for st in have)):
             db.add(st)
             db.commit()  # сразу: перезапуск воркера не потеряет написанное
-            log.info("сюжет написан: [%s] %s", st.topic, st.headline)
+            log.info("событие: [%s] %s", st.topic, st.headline)
         if "ai" in cat["topics"] and cat["events"] and not any(st.kind == "events" for st in have):
             afisha(db, s, cat, edition, now)
         if "weather" in cat["topics"] and cat.get("weather") and not any(st.kind == "weather" for st in have):
             forecast(db, s, cat, edition)
-    stories = db.scalars(select(Story).where(Story.edition == edition)).all()
-    todo = to_voice(db.scalars(select(User)).all(), stories, s.voice_margin, optional_topics(cat),
-                    date.fromisoformat(edition))
-    log.info("озвучиваем %d сюжетов из %d: остальные не влезают ни в чей выпуск", len(todo), len(stories))
-    render_stories(db, s, todo, stories)
+    prepare(db, s, db.scalars(select(User)).all(), edition)
     ed.status = "ready"
     db.commit()
     log.info("выпуск дня %s готов", edition)
+
+
+def prepare(db, s: Settings, users: list[User], edition: str) -> list[Story]:
+    """Дописать и озвучить сюжеты, которые попадут в выпуски users. Возвращает все сюжеты дня.
+
+    Тексты и озвучка — главные расходы, а 40 событий дня целиком не нужны никому. Запас write_margin больше
+    voice_margin: длина ненаписанного сюжета — грубая оценка, а дубли видно только по готовым заголовкам.
+    """
+    cat, day = catalog(), date.fromisoformat(edition)
+    stories = db.scalars(select(Story).where(Story.edition == edition)).all()
+    optional = optional_topics(cat)
+    drafts = [st for st in needed(users, stories, s.write_margin, optional, day) if st.status == "draft"]
+    if drafts:
+        llm = make_llm(s)
+        for st in sorted(drafts, key=lambda x: -x.importance):
+            try:
+                editor.write_draft(db, llm, st, cat["sources"])
+                log.info("сюжет написан: [%s] %s", st.topic, st.headline)
+            except Exception as e:
+                log.error("write_failed %s: %r", st.headline, e)
+                st.status = "failed"
+            db.commit()
+    todo = [st for st in needed(users, stories, s.voice_margin, optional, day) if st.status == "new"]
+    log.info("событий %d, пишем %d, озвучиваем %d: остальное не влезает ни в чей выпуск",
+             len(stories), len(drafts), len(todo))
+    render_stories(db, s, todo, stories)
+    return stories
 
 
 def render_stories(db, s: Settings, todo: list[Story], day: list[Story]) -> None:
@@ -186,7 +209,7 @@ def prefetch_audio(stories: list[Story], s: Settings, workers: int = 4) -> None:
 
 def ticker_text(stories: list[Story], n: int = 10) -> str:
     """Бегущая строка: главные заголовки дня (общая для всех клипов дня — клипы рендерятся один раз на всех)."""
-    top = sorted((st for st in stories if st.kind == "story"), key=lambda x: -x.importance)[:n]
+    top = sorted((st for st in stories if st.kind == "story" and st.status != "draft"), key=lambda x: -x.importance)[:n]
     return "     •     ".join(st.headline for st in top)
 
 
@@ -198,8 +221,13 @@ def _key_words(headline: str) -> set[str]:
 
 
 def estimate(st: Story) -> float:
-    """Длительность клипа до озвучки: с ускорением tts_speed выходит около 2.7 слова в секунду."""
-    return len(f"{st.script} {st.reporter_script or ''}".split()) / 2.7 + 1
+    """Длительность клипа до озвучки: с ускорением tts_speed выходит около 2.7 слова в секунду.
+
+    У черновика текста ещё нет — середина вилки слов из промпта (MAIN 110–150, BRIEF 35–55).
+    """
+    words = ({"story": 130, "brief": 45}[st.kind] if st.status == "draft"
+             else len(f"{st.script} {st.reporter_script or ''}".split()))
+    return words / 2.7 + 1
 
 
 def pick_stories(user: User, stories: list[Story], budget: float, optional: frozenset = frozenset(),
@@ -213,7 +241,7 @@ def pick_stories(user: User, stories: list[Story], budget: float, optional: froz
     Погода от Клопика — тоже вне очереди и сразу после интро.
     optional — темы по желанию: при «все темы» (пустой список) они не попадают.
     Порядок в выпуске: погода, главные сюжеты, рынки, «ИИ в Праге», потом «коротко».
-    planning — ещё до озвучки: неозвученные тоже годятся, их длительность оценивается по тексту.
+    planning — ещё до текста и озвучки: черновики и неозвученные тоже годятся, их длительность оценивается.
     """
     muted = set(user.muted_sources or [])
     ok = [st for st in stories if (st.status != "failed" if planning else st.status == "ready")
@@ -234,17 +262,14 @@ def pick_stories(user: User, stories: list[Story], budget: float, optional: froz
     return sorted(chosen, key=lambda x: (rank[x.kind], -x.importance))
 
 
-def to_voice(users: list[User], stories: list[Story], margin: float, optional: frozenset = frozenset(),
-             day: date | None = None) -> list[Story]:
-    """Неозвученные сюжеты, которые попадут хоть к кому-то в выпуск.
-
-    Озвучка — главный расход, а 40 сюжетов дня не нужны никому целиком. margin — запас по длительности:
-    оценка по тексту неточная, а лишнее при склейке всё равно отрежется. day — день выпуска: от него зависит длина.
-    """
+def needed(users: list[User], stories: list[Story], margin: float, optional: frozenset = frozenset(),
+           day: date | None = None) -> list[Story]:
+    """Сюжеты, которые попадут хоть к кому-то в выпуск. margin — запас по длительности: оценка длины до озвучки
+    неточная, а лишнее при склейке всё равно отрежется. day — день выпуска: от него зависит длина."""
     need = {id(st) for u in users
             for st in pick_stories(u, stories, ((u.minutes_on(day) if day else u.minutes) * 60 - FRAME) * margin,
                                    optional, planning=True)}
-    return [st for st in stories if id(st) in need and st.status == "new"]
+    return [st for st in stories if id(st) in need]
 
 
 def intro_script(user: User, picked: list[Story], day: date | None = None) -> str:
@@ -266,11 +291,9 @@ def intro_script(user: User, picked: list[Story], day: date | None = None) -> st
 
 def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     cat = catalog()
-    stories = db.scalars(select(Story).where(Story.edition == edition)).all()
+    stories = prepare(db, s, [user], edition)  # новенький или поменял настройки после сборки — допишем его сюжеты
     optional = optional_topics(cat)
     day = date.fromisoformat(edition)
-    if missing := to_voice([user], stories, s.voice_margin, optional, day):  # новенький или поменял настройки после сборки
-        render_stories(db, s, missing, stories)
     picked = pick_stories(user, stories, user.minutes_on(day) * 60 - FRAME, optional)
     if not picked:
         log.warning("nothing to show user=%s edition=%s", user.id, edition)

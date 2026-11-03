@@ -47,7 +47,8 @@ def main(argv: list[str]) -> None:
             ed = edition_date(s)
             with producer.build_lock(s):
                 for st in db.scalars(select(Story).where(Story.edition == ed)).all():
-                    st.status = "new"
+                    if st.script or st.reporter_script:  # черновики и ненаписанные остаются как есть
+                        st.status = "new"
                 db.commit()
                 for old in (s.media_dir / "clips" / ed).glob("outro*.mp4"):  # финал общий на день — тоже заново
                     old.unlink()

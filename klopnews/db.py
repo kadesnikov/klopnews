@@ -66,7 +66,7 @@ class Story(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)  # котировки для блока рынков
     clip_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
     duration: Mapped[float] = mapped_column(Float, default=0.0)
-    status: Mapped[str] = mapped_column(String(10), default="new")  # new | ready | failed
+    status: Mapped[str] = mapped_column(String(10), default="new")  # draft (без текста) | new | ready | failed
 
 
 class Edition(Base):
