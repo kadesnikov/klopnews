@@ -212,6 +212,8 @@ def pick_stories(user: User, stories: list[Story], budget: float, optional: froz
     и вне очереди: иначе важные сюжеты выедают время раньше него.
     Погода от Клопика — тоже вне очереди и сразу после интро.
     optional — темы по желанию: при «все темы» (пустой список) они не попадают.
+    Каждой теме, которую человек отметил сам, — хотя бы один сюжет (самый важный в ней), тоже вне очереди:
+    иначе местные новости с невысокой важностью целиком вытесняются мировыми.
     Порядок в выпуске: погода, главные сюжеты, рынки, «ИИ в Праге», потом «коротко».
     planning — ещё до озвучки: неозвученные тоже годятся, их длительность оценивается по тексту.
     """
@@ -219,8 +221,13 @@ def pick_stories(user: User, stories: list[Story], budget: float, optional: froz
     ok = [st for st in stories if (st.status != "failed" if planning else st.status == "ready")
           and (st.topic in user.topics if user.topics else st.topic not in optional)
           and (st.kind in ("markets", "events", "weather") or any(src["id"] not in muted for src in st.sources))]
+    lead = {}  # самый важный сюжет каждой выбранной темы
+    for st in sorted(ok, key=lambda x: -x.importance):
+        if user.topics:
+            lead.setdefault(st.topic, id(st))
+    lead_ids = set(lead.values())
     chosen, used, seen, urls = [], 0.0, [], set()
-    for st in sorted(ok, key=lambda x: (x.kind not in ("weather", "markets"), -x.importance)):
+    for st in sorted(ok, key=lambda x: (x.kind not in ("weather", "markets"), id(x) not in lead_ids, -x.importance)):
         keys, own = _key_words(st.headline), {src["url"] for src in st.sources}
         if any(len(keys & k) >= 2 for k in seen) or own & urls:  # то же событие другим сюжетом или в другой теме
             continue
