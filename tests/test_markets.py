@@ -47,10 +47,37 @@ def test_weather_gear_and_summary():
     assert weather.gear({**rain, "code": 0, "rain_prob": 0, "rain_mm": 0, "tmax": 24}) == "sunglasses"
     assert weather.gear({**rain, "code": 0, "rain_prob": 0, "rain_mm": 0, "tmin": -8, "tmax": -2}) == "winter"
     assert weather.gear({**rain, "code": 73, "tmin": -6, "tmax": -1}) == "winter"
-    assert weather.parse({"daily": {"weather_code": [3], "temperature_2m_max": [14.6], "temperature_2m_min": [6.2],
-                                    "precipitation_probability_max": [None], "precipitation_sum": [0.0],
-                                    "wind_speed_10m_max": [18.0]}}) == \
-        {"tmin": 6, "tmax": 15, "code": 3, "rain_prob": 0, "rain_mm": 0.0, "wind": 5}
+    # ветер, как небо и осадки, — за день: ночной порыв 40 км/ч (11 м/с) на экран не попадает
+    assert weather.parse(forecast({})) == {"tmin": 4, "tmax": 10, "code": 3, "rain_prob": 10, "rain_mm": 0.0, "wind": 3}
+
+
+def forecast(wet: dict) -> dict:
+    """Ответ Open-Meteo на 4 ноября: пасмурно и сухо, а в часы wet — {час: (код WMO, мм, вероятность %)}.
+
+    Ветер днём 11 км/ч, но в 3 ночи порыв до 40 км/ч — он и попадает в дневной максимум.
+    """
+    rows = [wet.get(h, (3, 0.0, 10)) for h in range(24)]
+    return {"daily": {"temperature_2m_max": [10.4], "temperature_2m_min": [3.8], "wind_speed_10m_max": [40.0]},
+            "hourly": {"time": [f"2026-11-04T{h:02d}:00" for h in range(24)], "weather_code": [r[0] for r in rows],
+                       "precipitation": [r[1] for r in rows], "precipitation_probability": [r[2] for r in rows],
+                       "wind_speed_10m": [40.0 if h == 3 else 11.0 for h in range(24)]}}
+
+
+def test_weather_umbrella_only_for_real_daytime_rain():
+    from klopnews import weather
+
+    night = weather.parse(forecast({2: (61, 0.8, 25), 3: (63, 1.6, 25), 4: (51, 0.2, 20)}))  # прошёл до утра
+    assert weather.gear(night) == "" and weather.summary(night) == "+4°…+10°, облачно, ветер до 3 м/с"
+    drizzle = weather.parse(forecast({14: (51, 0.1, 20)}))  # капля мороси днём при 20% — не дождь
+    assert weather.gear(drizzle) == "" and weather.sky(drizzle) == "cloud"
+    rain = weather.parse(forecast({9: (61, 0.8, 70), 10: (63, 2.5, 85), 11: (61, 1.0, 80)}))
+    assert rain["rain_mm"] == 4.3 and weather.gear(rain) == "umbrella"
+    assert weather.summary(rain) == "+4°…+10°, дождь, осадки 85%, ветер до 3 м/с"
+    likely = weather.parse(forecast({16: (51, 0.3, 60)}))  # мало, но скорее всего будет
+    assert weather.gear(likely) == "umbrella"
+    no_ensemble = forecast({10: (63, 3.0, None)})
+    no_ensemble["hourly"]["precipitation_probability"] = [None] * 24  # вероятности нет — хватает миллиметров
+    assert weather.parse(no_ensemble)["rain_prob"] == 0 and weather.gear(weather.parse(no_ensemble)) == "umbrella"
 
 
 def test_weekend_markets_without_quotes():

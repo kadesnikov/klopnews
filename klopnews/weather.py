@@ -8,7 +8,11 @@ import httpx
 
 log = logging.getLogger(__name__)
 API = "https://api.open-meteo.com/v1/forecast"
-DAILY = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max"
+DAILY = "temperature_2m_max,temperature_2m_min"
+# Небо, осадки и ветер — по часам, а не дневным итогам: дневной weather_code — самый плохой час суток, и ночная
+# морось в 3 часа надевала Клопику зонтик на весь сухой день; так же и ночной порыв ветра.
+HOURLY = "weather_code,precipitation,precipitation_probability,wind_speed_10m"
+DAY = range(7, 22)  # часы, когда люди на улице
 
 # коды WMO → небо
 SNOW, RAIN, FOG = {71, 73, 75, 77, 85, 86}, {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99}, {45, 48}
@@ -19,7 +23,8 @@ def fetch(cfg: dict) -> dict | None:
     """Прогноз на сегодня: {'tmin', 'tmax', 'code', 'rain_prob', 'rain_mm', 'wind'} (wind — м/с)."""
     try:
         r = httpx.get(API, timeout=15, params={"latitude": cfg["lat"], "longitude": cfg["lon"], "daily": DAILY,
-                                                "timezone": cfg.get("timezone", "Europe/Prague"), "forecast_days": 1})
+                                                "hourly": HOURLY, "timezone": cfg.get("timezone", "Europe/Prague"),
+                                                "forecast_days": 1})
         r.raise_for_status()
         return parse(r.json())
     except Exception as e:
@@ -29,11 +34,14 @@ def fetch(cfg: dict) -> dict | None:
 
 def parse(payload: dict) -> dict | None:
     try:
-        d = payload["daily"]
+        d, h = payload["daily"], payload["hourly"]
+        day = [i for i, t in enumerate(h["time"]) if int(t[11:13]) in DAY]
         return {"tmin": round(d["temperature_2m_min"][0]), "tmax": round(d["temperature_2m_max"][0]),
-                "code": int(d["weather_code"][0]), "rain_prob": int(d["precipitation_probability_max"][0] or 0),
-                "rain_mm": float(d["precipitation_sum"][0] or 0), "wind": round(d["wind_speed_10m_max"][0] / 3.6)}
-    except (KeyError, IndexError, TypeError):
+                "code": max(int(h["weather_code"][i] or 0) for i in day),
+                "rain_prob": max(int(h["precipitation_probability"][i] or 0) for i in day),
+                "rain_mm": round(sum(float(h["precipitation"][i] or 0) for i in day), 1),
+                "wind": round(max(float(h["wind_speed_10m"][i] or 0) for i in day) / 3.6)}
+    except (KeyError, IndexError, TypeError, ValueError):
         return None
 
 
@@ -43,7 +51,7 @@ def sky(w: dict) -> str:
         return "snow"
     if code >= 95:
         return "storm"
-    if code in RAIN or (w["rain_prob"] >= 60 and w["rain_mm"] >= 1):
+    if code in RAIN and (w["rain_mm"] >= 1 or w["rain_prob"] >= 50):  # капля мороси при 20% — ещё не дождь
         return "rain"
     if code in FOG:
         return "fog"
