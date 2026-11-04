@@ -8,10 +8,10 @@ import httpx
 
 log = logging.getLogger(__name__)
 API = "https://api.open-meteo.com/v1/forecast"
-DAILY = "temperature_2m_max,temperature_2m_min,wind_speed_10m_max"
-# Небо и осадки — по часам, а не дневным weather_code: тот берёт самый плохой час суток, и ночная морось
-# в 3 часа надевала Клопику зонтик на весь сухой день.
-HOURLY = "weather_code,precipitation,precipitation_probability"
+DAILY = "temperature_2m_max,temperature_2m_min"
+# Небо, осадки и ветер — по часам, а не дневным итогам: дневной weather_code — самый плохой час суток, и ночная
+# морось в 3 часа надевала Клопику зонтик на весь сухой день; так же и ночной порыв ветра.
+HOURLY = "weather_code,precipitation,precipitation_probability,wind_speed_10m"
 DAY = range(7, 22)  # часы, когда люди на улице
 
 # коды WMO → небо
@@ -40,7 +40,7 @@ def parse(payload: dict) -> dict | None:
                 "code": max(int(h["weather_code"][i] or 0) for i in day),
                 "rain_prob": max(int(h["precipitation_probability"][i] or 0) for i in day),
                 "rain_mm": round(sum(float(h["precipitation"][i] or 0) for i in day), 1),
-                "wind": round(d["wind_speed_10m_max"][0] / 3.6)}
+                "wind": round(max(float(h["wind_speed_10m"][i] or 0) for i in day) / 3.6)}
     except (KeyError, IndexError, TypeError, ValueError):
         return None
 
