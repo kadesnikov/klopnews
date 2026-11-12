@@ -84,7 +84,7 @@ class Episode(Base):
     edition: Mapped[str] = mapped_column(String(10))
     slug: Mapped[str] = mapped_column(String(20), unique=True, default=lambda: secrets.token_urlsafe(9))
     duration: Mapped[float] = mapped_column(Float, default=0.0)
-    chapters: Mapped[list] = mapped_column(JSON, default=list)  # [{t, title, topic, sources}]
+    chapters: Mapped[list] = mapped_column(JSON, default=list)  # [{t, title, topic, bullets, sources}]
     notified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

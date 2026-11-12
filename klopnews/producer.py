@@ -336,7 +336,7 @@ def assemble(db, s: Settings, user: User, edition: str) -> Episode | None:
     chapters, t = [{"t": 0, "title": "Начало выпуска", "topic": "", "sources": []}], intro_dur
     for st in picked:
         chapters.append({"t": round(t, 1), "title": st.headline, "topic": st.topic, "kind": st.kind,
-                         "reporter": bool(st.reporter_script), "sources": st.sources})
+                         "reporter": bool(st.reporter_script), "bullets": st.bullets, "sources": st.sources})
         t += st.duration
     out = s.media_dir / "episodes" / f"{ep.slug}.mp4"
     ep.duration = studio.concat([intro_path, *[s.media_dir / st.clip_path for st in picked], outro_path], out)

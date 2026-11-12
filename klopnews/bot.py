@@ -2,12 +2,13 @@
 import logging
 import threading
 import time
+from html import escape
 
 import httpx
 from sqlalchemy import select
 
 from klopnews.auth import sign
-from klopnews.config import Settings
+from klopnews.config import Settings, catalog
 from klopnews.db import User, session
 
 log = logging.getLogger(__name__)
@@ -39,10 +40,29 @@ def login_url(s: Settings, user: User, next_path: str = "/") -> str:
     return f"{s.public_url}/login?t={sign(user.id, LOGIN_TTL, s.session_secret)}&next={next_path}"
 
 
+def digest(chapters: list[dict], topics: dict, limit: int = 3500) -> str:
+    """Текстовая версия выпуска для тех, кому сейчас не до видео: темы, заголовки, пункты с экрана."""
+    lines, topic = [], None
+    for c in chapters[1:]:
+        if c.get("topic") != topic:
+            topic = c.get("topic")
+            if title := topics.get(topic, {}).get("title"):
+                lines.append(f"\n<b>{escape(title.upper())}</b>")
+        lines.append(f"• <b>{escape(c['title'])}</b>")
+        if bullets := c.get("bullets"):
+            lines.append(escape(" · ".join(bullets)))
+    body = "\n".join(lines).strip()
+    if len(body) > limit:  # у Telegram предел 4096 знаков, а теги считаются; режем по строке, чтобы не порвать тег
+        body = body[:body.rfind("\n", 0, limit)] + "\n…"
+    return f"<blockquote expandable>{body}</blockquote>" if body else ""
+
+
 def notify_episode(s: Settings, user: User, ep, n_stories: int) -> None:
     minutes = max(1, round(ep.duration / 60))
-    send(s, user.tg_id, f"🐞 <b>Клоп·Новости готовы</b>\n{n_stories} сюжетов, {minutes} мин.",
-         ("▶️ Смотреть выпуск", f"{s.public_url}/e/{ep.slug}?src=tg"))
+    text = f"🐞 <b>Клоп·Новости готовы</b>\n{n_stories} сюжетов, {minutes} мин."
+    if brief := digest(ep.chapters, catalog()["topics"]):
+        text += f"\n\n{brief}"
+    send(s, user.tg_id, text, ("▶️ Смотреть выпуск", f"{s.public_url}/e/{ep.slug}?src=tg"))
 
 
 def handle(s: Settings, msg: dict, make_now) -> None:
