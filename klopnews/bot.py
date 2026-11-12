@@ -40,26 +40,50 @@ def login_url(s: Settings, user: User, next_path: str = "/") -> str:
     return f"{s.public_url}/login?t={sign(user.id, LOGIN_TTL, s.session_secret)}&next={next_path}"
 
 
+SELF_TITLED = {"weather", "markets"}  # заголовок рубрики уже называет тему: «Погода: …», «Рынки за день»
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    return few if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else many
+
+
 def digest(chapters: list[dict], topics: dict, limit: int = 3500) -> str:
-    """Текстовая версия выпуска для тех, кому сейчас не до видео: темы, заголовки, пункты с экрана."""
-    lines, topic = [], None
-    for c in chapters[1:]:
-        if c.get("topic") != topic:
-            topic = c.get("topic")
-            if title := topics.get(topic, {}).get("title"):
-                lines.append(f"\n<b>{escape(title.upper())}</b>")
-        lines.append(f"• <b>{escape(c['title'])}</b>")
-        if bullets := c.get("bullets"):
-            lines.append(escape(" · ".join(bullets)))
-    body = "\n".join(lines).strip()
-    if len(body) > limit:  # у Telegram предел 4096 знаков, а теги считаются; режем по строке, чтобы не порвать тег
-        body = body[:body.rfind("\n", 0, limit)] + "\n…"
-    return f"<blockquote expandable>{body}</blockquote>" if body else ""
+    """Текстовая версия выпуска для тех, кому сейчас не до видео: темы, заголовки, пункты с экрана.
+
+    Свёрнутая цитата показывает первые строки — поэтому первым идёт сюжет, а не служебная шапка."""
+    stories = chapters[1:]
+    groups: list[list[dict]] = []
+    for c in stories:
+        if groups and groups[-1][0].get("topic") == c.get("topic"):
+            groups[-1].append(c)
+        else:
+            groups.append([c])
+    blocks, used, shown = [], 0, 0
+    for group in groups:
+        title = topics.get(group[0].get("topic"), {}).get("title")
+        head = [f"<b>{escape(title)}</b>"] if title and not all(c.get("kind") in SELF_TITLED for c in group) else []
+        gap = "\n\n"  # между темами — пустая строка, внутри темы — нет
+        for c in group:
+            item = f"• {escape(c['title'])}"
+            if bullets := c.get("bullets"):
+                item += f"\n<i>{escape(' · '.join(bullets))}</i>"
+            block = "\n".join([*head, item])
+            # у Telegram предел 4096 знаков вместе с тегами; сюжет не рвём — либо целиком, либо «и ещё N»
+            if used + len(block) > limit:
+                rest = len(stories) - shown
+                blocks.append(f"\n\n…и ещё {rest} {plural(rest, 'сюжет', 'сюжета', 'сюжетов')} — в выпуске")
+                return f"<blockquote expandable>{''.join(blocks).strip()}</blockquote>"
+            blocks.append(gap + block)
+            used, shown, head, gap = used + len(block) + 2, shown + 1, [], "\n"
+    return f"<blockquote expandable>{''.join(blocks).strip()}</blockquote>" if blocks else ""
 
 
 def notify_episode(s: Settings, user: User, ep, n_stories: int) -> None:
     minutes = max(1, round(ep.duration / 60))
-    text = f"🐞 <b>Клоп·Новости готовы</b>\n{n_stories} сюжетов, {minutes} мин."
+    text = (f"🐞 <b>Клоп·Новости готовы</b>\n"
+            f"{n_stories} {plural(n_stories, 'сюжет', 'сюжета', 'сюжетов')} · {minutes} мин")
     if brief := digest(ep.chapters, catalog()["topics"]):
         text += f"\n\n{brief}"
     send(s, user.tg_id, text, ("▶️ Смотреть выпуск", f"{s.public_url}/e/{ep.slug}?src=tg"))
