@@ -113,6 +113,8 @@ def handle(s: Settings, msg: dict, make_now) -> None:
         elif text.startswith("/admin") and user.tg_id in s.admin_ids:
             send(s, chat, "Кто подключён, кто смотрит и сколько досматривает:",
                  ("📊 Открыть админку", login_url(s, user, "/admin")))
+        elif text.split()[:2] == ["/start", "login"]:  # кнопка «Получить новую ссылку» на сайте, когда старая устарела
+            send(s, chat, "Вот свежая ссылка для входа — она работает неделю 🐞", ("🔑 Войти на сайт", login_url(s, user)))
         elif text.startswith("/settings"):
             send(s, chat, "Темы, источники и длительность выпуска:", ("⚙️ Настройки", login_url(s, user, "/settings")))
         else:
