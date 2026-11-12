@@ -1,18 +1,20 @@
 """Сайт: страница выпуска (открыта по ссылке — удобно делиться), список выпусков и настройки (по входу из бота)."""
 import re
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from klopnews import stats
 from klopnews.auth import sign, verify
+from klopnews.bot import plural
 from klopnews.config import catalog, settings
 from klopnews.db import Episode, User, View, session, utcnow
 from klopnews.producer import date_label
@@ -35,6 +37,7 @@ app.mount("/media/episodes", StaticFiles(directory=settings().media_dir / "episo
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["mmss"] = lambda t: f"{int(t) // 60}:{int(t) % 60:02d}"
 templates.env.globals["date_label"] = date_label
+templates.env.filters["stories"] = lambda n: f"{n} {plural(n, 'сюжет', 'сюжета', 'сюжетов')}"
 DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MINUTES = [5, 7, 10, 15, 20]
 
@@ -90,7 +93,14 @@ def index(request: Request):
         user = current_user(request, db)
         episodes = db.scalars(select(Episode).where(Episode.user_id == user.id)
                               .order_by(Episode.created_at.desc()).limit(30)).all() if user else []
-        return page(request, "index.html", user=user, episodes=episodes)
+        seen = dict(db.execute(select(View.episode_id, func.max(View.max_t))
+                               .where(View.viewer_id == user.id, View.episode_id.in_([e.id for e in episodes]))
+                               .group_by(View.episode_id)).all()) if episodes else {}
+        progress = {e.id: min(1.0, seen[e.id] / max(e.duration, 1.0)) for e in episodes if e.id in seen}
+        latest = episodes[0] if episodes else None
+        poster = bool(latest) and (settings().media_dir / "episodes" / f"{latest.slug}.jpg").exists()
+        today = datetime.now(ZoneInfo(settings().timezone)).date().isoformat()
+        return page(request, "index.html", user=user, episodes=episodes, progress=progress, poster=poster, today=today)
 
 
 @app.get("/e/{slug}", response_class=HTMLResponse)

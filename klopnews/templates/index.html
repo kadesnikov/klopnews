@@ -4,24 +4,61 @@
   <h1>Привет, {{ user.name }}!</h1>
   <p class="muted">Новый выпуск каждый день в {{ user.delivery_time }}, примерно {{ week_label(user) }}. Ссылка придёт в Telegram.</p>
   {% if episodes %}
-  <ul class="episodes">
-    {% for ep in episodes %}
+  {% set ep = episodes[0] %}{% set p = progress.get(ep.id) %}
+  <a class="latest" href="/e/{{ ep.slug }}">
+    <div class="latest-media">
+      {% if poster %}<img src="/media/episodes/{{ ep.slug }}.jpg" alt="">
+      {% else %}<div class="studio" aria-hidden="true"><img src="/static/klop.png" alt=""><img src="/static/klopik.png" alt=""></div>{% endif %}
+      <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24" width="28" height="28"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg></span>
+    </div>
+    <div class="latest-body">
+      <h2>{% if ep.edition == today %}Сегодняшний выпуск{% else %}Последний выпуск{% endif %}</h2>
+      <p class="muted">{{ date_label(ep.edition) }} · {{ (ep.chapters|length - 1)|stories }} · {{ ep.duration|mmss }}</p>
+      <ul class="headlines">
+        {% for c in ep.chapters[1:4] %}<li>{% if c.topic in topics %}<span class="dot" style="background: {{ topics[c.topic].color }}"></span>{% endif %}{{ c.title }}</li>{% endfor %}
+      </ul>
+      <span class="btn">{% if p and p < 0.95 %}Досмотреть{% elif p %}Посмотреть ещё раз{% else %}Смотреть{% endif %}</span>
+      {% if p and p < 0.95 %}<span class="watched"><span class="meter"><i style="width: {{ (p * 100)|round }}%"></i></span> досмотрено на {{ (p * 100)|round|int }}%</span>{% endif %}
+    </div>
+  </a>
+  {% if episodes|length > 1 %}
+  <h2 class="archive-title">Прошлые выпуски</h2>
+  <ul class="archive">
+    {% for ep in episodes[1:] %}{% set p = progress.get(ep.id) %}
     <li><a href="/e/{{ ep.slug }}">
-      <img src="/media/episodes/{{ ep.slug }}.jpg" alt="" loading="lazy">
-      <span><b>{{ date_label(ep.edition) }}</b><br><span class="muted">{{ ep.chapters|length - 1 }} сюжетов · {{ ep.duration|mmss }}</span></span>
+      <span class="when">{{ date_label(ep.edition) }}</span>
+      <span class="what muted">{{ (ep.chapters|length - 1)|stories }} · {{ ep.duration|mmss }}</span>
+      <span class="state">{% if p is none %}<span class="new">новый</span>{% elif p >= 0.95 %}<span class="muted">досмотрен</span>{% else %}<span class="meter"><i style="width: {{ (p * 100)|round }}%"></i></span><span class="muted">{{ (p * 100)|round|int }}%</span>{% endif %}</span>
     </a></li>
     {% endfor %}
   </ul>
+  {% endif %}
   {% else %}
-  <p class="card">Выпусков пока нет. Напиши боту <code>/now</code> — соберу первый прямо сейчас.</p>
+  <div class="note">
+    <img src="/static/klopik.png" alt="" width="64" height="64">
+    <div>
+      <h2>Выпусков пока нет</h2>
+      <p>Первый придёт в {{ user.delivery_time }} — Клопик уже готовит включение. Не хочется ждать? Напиши боту <code>/now</code>, и выпуск соберётся за пару минут.</p>
+      {% if bot %}<a class="btn" href="https://t.me/{{ bot }}">Открыть бота</a>{% endif %}
+    </div>
+  </div>
   {% endif %}
 {% else %}
+  {% if request.query_params.get("expired") %}
+  <div class="note warn-note" role="alert">
+    <img src="/static/klop.png" alt="" width="64" height="64">
+    <div>
+      <h2>Ссылка для входа устарела</h2>
+      <p>Такие ссылки работают неделю — так никто чужой не зайдёт в твои настройки. Нажми кнопку, и Клоп Александрович пришлёт в Telegram свежую.</p>
+      {% if bot %}<a class="btn" href="https://t.me/{{ bot }}?start=login">Получить новую ссылку</a>{% endif %}
+    </div>
+  </div>
+  {% endif %}
   <section class="hero">
-    <img src="/static/favicon.svg" alt="" width="96" height="96">
+    <div class="duo" aria-hidden="true"><img src="/static/klop.png" alt="" width="112" height="112"><img src="/static/klopik.png" alt="" width="112" height="112"></div>
     <h1>Клоп·Новости</h1>
     <p>Персональный видеовыпуск новостей с ведущим Клопом Александровичем и корреспонденткой Клопиком. Только твои темы и источники.</p>
-    {% if request.query_params.get("expired") %}<p class="warn">Ссылка для входа устарела — попроси у бота новую командой /settings.</p>{% endif %}
-    {% if bot %}<a class="btn" href="https://t.me/{{ bot }}">Открыть бота в Telegram</a>{% endif %}
+    {% if bot and not request.query_params.get("expired") %}<a class="btn" href="https://t.me/{{ bot }}">Открыть бота в Telegram</a>{% endif %}
   </section>
 {% endif %}
 {% endblock %}
