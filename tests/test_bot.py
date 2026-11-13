@@ -44,3 +44,31 @@ def test_digest_empty_for_old_episode():
                                      (14, "сюжетов"), (21, "сюжет"), (22, "сюжета"), (111, "сюжетов")])
 def test_plural(n, word):
     assert bot.plural(n, "сюжет", "сюжета", "сюжетов") == word
+
+
+def test_notify_falls_back_to_plain_message(monkeypatch):
+    from types import SimpleNamespace
+    from klopnews.config import settings
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x")
+    settings.cache_clear()
+    sent = []
+
+    def api(s, method, **p):  # Telegram отвергает сообщение с цитатой
+        sent.append(p["text"])
+        return {"ok": "blockquote" not in p["text"]}
+
+    monkeypatch.setattr(bot, "api", api)
+    ep = SimpleNamespace(duration=480, slug="abc", chapters=[INTRO, {"t": 5, "title": "Новость", "topic": "ai"}])
+    bot.notify_episode(settings(), SimpleNamespace(id=1, tg_id=7), ep, 1)
+    assert len(sent) == 2 and "blockquote" not in sent[1] and "1 сюжет · 8 мин" in sent[1]
+
+
+def test_notify_raises_when_nothing_was_delivered(monkeypatch):
+    from types import SimpleNamespace
+    from klopnews.config import settings
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x")
+    settings.cache_clear()
+    monkeypatch.setattr(bot, "api", lambda s, m, **p: {"ok": False})
+    ep = SimpleNamespace(duration=60, slug="abc", chapters=[INTRO])
+    with pytest.raises(RuntimeError):
+        bot.notify_episode(settings(), SimpleNamespace(id=1, tg_id=7), ep, 0)

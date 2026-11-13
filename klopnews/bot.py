@@ -22,10 +22,10 @@ def api(s: Settings, method: str, **params) -> dict:
     return r.json()
 
 
-def send(s: Settings, chat_id: int, text: str, button: tuple[str, str] | None = None) -> None:
+def send(s: Settings, chat_id: int, text: str, button: tuple[str, str] | None = None) -> bool:
     if not s.telegram_bot_token:
         log.info("telegram off, message to %s: %s %s", chat_id, text, button or "")
-        return
+        return True
     params = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
     if button and button[1].startswith("https://"):  # Telegram принимает в кнопках только https
         params["reply_markup"] = {"inline_keyboard": [[{"text": button[0], "url": button[1]}]]}
@@ -34,6 +34,7 @@ def send(s: Settings, chat_id: int, text: str, button: tuple[str, str] | None = 
     res = api(s, "sendMessage", **params)
     if not res.get("ok"):
         log.warning("send_failed chat=%s: %s", chat_id, res)
+    return bool(res.get("ok"))
 
 
 def login_url(s: Settings, user: User, next_path: str = "/") -> str:
@@ -82,11 +83,18 @@ def digest(chapters: list[dict], topics: dict, limit: int = 3500) -> str:
 
 def notify_episode(s: Settings, user: User, ep, n_stories: int) -> None:
     minutes = max(1, round(ep.duration / 60))
-    text = (f"🐞 <b>Клоп·Новости готовы</b>\n"
+    head = (f"🐞 <b>Клоп·Новости готовы</b>\n"
             f"{n_stories} {plural(n_stories, 'сюжет', 'сюжета', 'сюжетов')} · {minutes} мин")
-    if brief := digest(ep.chapters, catalog()["topics"]):
-        text += f"\n\n{brief}"
-    send(s, user.tg_id, text, ("▶️ Смотреть выпуск", f"{s.public_url}/e/{ep.slug}?src=tg"))
+    button = ("▶️ Смотреть выпуск", f"{s.public_url}/e/{ep.slug}?src=tg")
+    try:
+        brief = digest(ep.chapters, catalog()["topics"])
+    except Exception as e:  # дайджест — приятное дополнение: из-за него выпуск не должен потеряться
+        log.warning("digest_failed ep=%s: %r", ep.slug, e)
+        brief = ""
+    if brief and send(s, user.tg_id, f"{head}\n\n{brief}", button):
+        return
+    if not send(s, user.tg_id, head, button):  # Telegram отверг дайджест — шлём хотя бы ссылку на выпуск
+        raise RuntimeError(f"telegram rejected episode notification for user {user.id}")
 
 
 def handle(s: Settings, msg: dict, make_now) -> None:
