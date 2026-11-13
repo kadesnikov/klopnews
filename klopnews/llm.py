@@ -12,6 +12,16 @@ from klopnews.config import Settings
 
 log = logging.getLogger(__name__)
 KIMI_BASE_URL = "https://api.moonshot.ai/anthropic"
+BILLING_WORDS = ("quota", "balance", "billing", "insufficient", "suspended", "credit")
+problem: str | None = None  # последний отказ из-за денег или ключа: сборка увидит его, даже если ошибку проглотили
+
+
+class LLMBillingError(RuntimeError):
+    """Модель отказывает из-за денег или ключа: повторять бессмысленно, нужен человек."""
+
+
+def billing_problem(status: int, text: str) -> bool:
+    return status in (401, 402, 403) or status == 429 and any(w in text.lower() for w in BILLING_WORDS)
 
 
 def extract_json(text: str):
@@ -32,10 +42,20 @@ class AnthropicLLM:
         self.client = anthropic.Anthropic(api_key=s.llm_api_key, base_url=base_url, timeout=180)
         self.model, self.max_tokens = s.llm_model, s.llm_max_tokens
         self.extra = {"thinking": {"type": "disabled"}} if s.llm_provider == "kimi" else {}
+        self.provider = s.llm_provider
 
     def complete(self, system: str, user: str) -> str:
-        resp = self.client.messages.create(model=self.model, max_tokens=self.max_tokens, system=system,
-                                           messages=[{"role": "user", "content": user}], **self.extra)
+        import anthropic
+
+        global problem
+        try:
+            resp = self.client.messages.create(model=self.model, max_tokens=self.max_tokens, system=system,
+                                               messages=[{"role": "user", "content": user}], **self.extra)
+        except anthropic.APIStatusError as e:
+            if billing_problem(e.status_code, str(e)):
+                problem = f"модель {self.provider}: закончились деньги или не принят ключ ({e.status_code}): {str(e)[:300]}"
+                raise LLMBillingError(problem) from e
+            raise
         return "".join(b.text for b in resp.content if b.type == "text")
 
 
