@@ -15,7 +15,7 @@ from klopnews.config import Settings, catalog, optional_topics
 from klopnews.db import Edition, Episode, Story, User
 from klopnews.llm import make_llm
 from klopnews.render import studio
-from klopnews.tts import RATE, synthesize
+from klopnews.tts import RATE, TTSError, synthesize
 
 log = logging.getLogger(__name__)
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября",
@@ -155,6 +155,10 @@ def render_stories(db, s: Settings, todo: list[Story], day: list[Story]) -> None
         try:
             render_story(st, s, cat, tick)
             log.info("клип %d/%d готов: %s", i, len(todo), st.headline)
+        except TTSError as e:
+            if not e.transient:
+                raise  # кончились деньги — дальше пытаться бессмысленно, пусть узнает админ
+            log.error("render_postponed story=%s: %s", st.id, e)  # остаётся new: озвучим при следующей попытке
         except Exception as e:
             log.exception("render_failed story=%s: %r", st.id, e)
             st.status = "failed"

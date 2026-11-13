@@ -7,7 +7,9 @@ dummy      — без ключа: «бу-бу-бу» по слогам, чтоб
 Все модели читают медленнее телеведущих, поэтому дорожка ускоряется на tts_speed без смены тона.
 """
 import hashlib
+import logging
 import subprocess
+import time
 import wave
 from pathlib import Path
 
@@ -16,7 +18,41 @@ import numpy as np
 
 from klopnews.config import Settings
 
+log = logging.getLogger(__name__)
 RATE = 24000  # gpt-4o-mini-tts отдаёт 24 кГц моно
+RETRY_WAITS = [5, 15, 30, 60, 120]  # 429 по лимиту запросов и 5xx проходят за секунды–минуты
+
+
+class TTSError(RuntimeError):
+    """Озвучка не удалась. transient=True — сбой временный, сюжет стоит озвучить позже."""
+
+    def __init__(self, message: str, transient: bool):
+        super().__init__(message)
+        self.transient = transient
+
+
+def _post(url: str, **kw) -> httpx.Response:
+    """Запрос к озвучке с повторами: лимит запросов и сбои сервера пережидаем, кончившиеся деньги — нет."""
+    for attempt, wait in enumerate([*RETRY_WAITS, None], 1):
+        try:
+            r = httpx.post(url, timeout=180, **kw)
+        except httpx.TransportError as e:
+            problem, transient = f"сеть: {e!r}", True
+        else:
+            if r.is_success:
+                return r
+            body = r.text[:300]
+            if r.status_code == 429 and "insufficient_quota" in body:
+                raise TTSError(f"TTS: закончились деньги на счёте ({r.status_code}): {body}", transient=False)
+            transient = r.status_code == 429 or r.status_code >= 500
+            problem = f"HTTP {r.status_code}: {body}"
+            if transient and wait is not None:
+                wait = max(wait, min(float(r.headers.get("retry-after", 0) or 0), 300))
+        if not transient or wait is None:
+            raise TTSError(f"TTS не ответила после {attempt} попыток — {problem}", transient=transient)
+        log.warning("tts_retry %d/%d через %.0f с: %s", attempt, len(RETRY_WAITS), wait, problem)
+        time.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 def synthesize(text: str, voice: str, instructions: str, s: Settings) -> Path:
@@ -45,15 +81,14 @@ def _raw(text: str, voice: str, instructions: str, s: Settings) -> Path:
         tmp.rename(path)
         return path
     if s.tts_provider == "elevenlabs":
-        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=pcm_{RATE}", timeout=180,
-                       headers={"xi-api-key": s.tts_api_key},
-                       json={"text": text, "model_id": s.tts_model, "language_code": "ru"})
+        r = _post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=pcm_{RATE}",
+                  headers={"xi-api-key": s.tts_api_key},
+                  json={"text": text, "model_id": s.tts_model, "language_code": "ru"})
     else:
-        r = httpx.post(f"{s.tts_base_url.rstrip('/')}/audio/speech", timeout=180,
-                       headers={"Authorization": f"Bearer {s.tts_api_key}"},
-                       json={"model": s.tts_model, "voice": voice, "input": text,
-                             "instructions": instructions, "response_format": "pcm"})
-    r.raise_for_status()
+        r = _post(f"{s.tts_base_url.rstrip('/')}/audio/speech",
+                  headers={"Authorization": f"Bearer {s.tts_api_key}"},
+                  json={"model": s.tts_model, "voice": voice, "input": text,
+                        "instructions": instructions, "response_format": "pcm"})
     write_wav(tmp, np.frombuffer(r.content[: len(r.content) // 2 * 2], dtype="<i2").astype(np.float32) / 32768)
     tmp.rename(path)
     return path

@@ -17,7 +17,9 @@ from klopnews.db import Edition, Episode, User, session
 
 log = logging.getLogger(__name__)
 LOCK = threading.Lock()
-TRIED: set[tuple[int, str]] = set()  # (user, выпуск): не повторять каждую минуту после неудачи
+# (user, выпуск) → (сколько раз не вышло, когда пробовать снова): не долбить каждую минуту, но и не сдаваться сразу
+TRIED: dict[tuple[int, str], tuple[int, float]] = {}
+RETRY_MINUTES = [10, 20, 40]  # временный сбой (лимит озвучки, сеть) обычно проходит за минуты
 ALERTED: set[str] = set()  # о каждой беде админу — один раз, а не каждую минуту
 STUCK_AFTER = 45 * 60  # обычная сборка — минут 10–20; дольше часа без движения — воркер завис
 _busy_since: float | None = None  # когда начался текущий tick (None — воркер спит между тиками)
@@ -99,14 +101,22 @@ def tick(s: Settings, last_fetch: float) -> float:
         ensure_edition(db, s)
         done = set(db.scalars(select(Episode.user_id).where(Episode.edition == ed)))
         for user in db.scalars(select(User)).all():
-            if user.id not in done and (user.id, ed) not in TRIED and hhmm >= user.delivery_time:
-                TRIED.add((user.id, ed))
-                try:
-                    deliver(db, s, user, ed)
-                except Exception as e:
-                    db.rollback()
-                    log.exception("deliver_failed user=%s: %r", user.id, e)
-                    alert(s, f"deliver:{user.id}:{ed}", f"Не доставлен выпуск для {user.name}: {e!r}")
+            fails, next_try = TRIED.get((user.id, ed), (0, 0.0))
+            if user.id in done or hhmm < user.delivery_time or time.time() < next_try or fails > len(RETRY_MINUTES):
+                continue
+            try:
+                deliver(db, s, user, ed)
+            except Exception as e:
+                db.rollback()
+                log.exception("deliver_failed user=%s attempt=%d: %r", user.id, fails + 1, e)
+                if fails < len(RETRY_MINUTES):
+                    TRIED[(user.id, ed)] = (fails + 1, time.time() + RETRY_MINUTES[fails] * 60)
+                    alert(s, f"deliver:{user.id}:{ed}", f"Не доставлен выпуск для {user.name}: {e!r}. "
+                                                        f"Повторю через {RETRY_MINUTES[fails]} мин.")
+                else:
+                    TRIED[(user.id, ed)] = (fails + 1, float("inf"))
+                    alert(s, f"deliver_gave_up:{user.id}:{ed}", f"Сдался: выпуск для {user.name} так и не собрался "
+                                                                f"после {fails + 1} попыток. Последняя ошибка: {e!r}")
     return last_fetch
 
 

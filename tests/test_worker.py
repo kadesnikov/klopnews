@@ -56,3 +56,32 @@ def test_watchdog_quiet_between_ticks(sent, monkeypatch):
     with pytest.raises(StopIteration):
         worker.watchdog(settings())
     assert sent == []
+
+
+def test_failed_delivery_is_retried_later(sent, monkeypatch):
+    from klopnews.db import User, session
+    s = settings()
+    with session() as db:
+        db.add(User(tg_id=7, name="Маша", minutes=5, delivery_time="07:30"))
+        db.commit()
+    clock = [1000.0]
+    monkeypatch.setattr(worker.time, "time", lambda: clock[0])
+    monkeypatch.setattr(worker, "TRIED", {})
+    monkeypatch.setattr(worker, "local_now", lambda s: worker.datetime(2026, 11, 13, 7, 31))
+    monkeypatch.setattr(worker.feeds, "fetch_all", lambda src: 0)
+    monkeypatch.setattr(worker, "ensure_edition", lambda db, s: "2026-11-13")
+    attempts = []
+
+    def deliver(db, s, user, ed):
+        attempts.append(clock[0])
+        if len(attempts) < 3:
+            raise RuntimeError("429")
+        db.add(worker.Episode(user_id=user.id, edition=ed))  # получилось — выпуск есть, больше не трогаем
+        db.commit()
+
+    monkeypatch.setattr(worker, "deliver", deliver)
+    for minute in range(60):  # час работы воркера
+        clock[0] = 1000.0 + minute * 60
+        worker.tick(s, clock[0])
+    assert [round((t - 1000) / 60) for t in attempts] == [0, 10, 30]  # сразу, через 10 и ещё через 20 мин
+    assert len(sent) == 2  # один алерт админам (их двое), без спама на каждой попытке
