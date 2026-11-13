@@ -23,10 +23,12 @@
 {% set sel = r.sel %}
 <section class="card block desk">
   <h2><span class="dot" style="background: {{ r.color }}"></span>{{ r.title }}</h2>
-  <p class="muted small">Сборка {{ sel.created_at|local }} · модель видела {{ sel.shown|length }} · выбрала {{ r.events|length }}
-    {%- if r.limit %} · <span class="warn">{{ r.limit|length }} не влезли в окно</span>{% endif %}
-    {%- if r.used %} · {{ r.used|length }} уже были в эфире{% endif %}</p>
-  {% if sel.error %}<p class="warn small">Сбой при выборе: {{ sel.error }}</p>{% endif %}
+  <p class="muted small">Сборка {{ sel.created_at|local }}{% if sel.shown %} · модель видела {{ plural(sel.shown|length, "новость", "новости", "новостей") }}
+    · выбрала {{ plural(r.events|length, "событие", "события", "событий") }}
+    {%- if r.limit %} · <span class="warn">{{ plural(r.limit|length, "не влезла", "не влезли", "не влезли") }} в окно</span>{% endif %}
+    {%- if r.used %} · {{ r.used|length }} уже в сюжетах{% endif %}{% endif %}</p>
+  {% if sel.error %}<p class="warn small">Сбой при выборе: {{ sel.error }}</p>
+  {% elif not sel.shown %}<p class="muted small">Свежих новостей по теме за сутки не было — модель не спрашивали.</p>{% endif %}
 
   {% if r.events %}
   <ol class="events">
@@ -47,9 +49,9 @@
 
   {% if r.rest %}<details><summary>Видела, но не выбрала — {{ r.rest|length }}</summary>
     <ul class="items">{% for it in r.rest %}{{ item(it) }}{% endfor %}</ul></details>{% endif %}
-  {% if r.limit %}<details><summary>Не видела: не влезли в окно из 60 свежих — {{ r.limit|length }}</summary>
+  {% if r.limit %}<details><summary>Не видела: не влезли в окно из 60 самых свежих — {{ r.limit|length }}</summary>
     <ul class="items">{% for it in r.limit %}{{ item(it) }}{% endfor %}</ul></details>{% endif %}
-  {% if r.used %}<details><summary>Не показана: по ней уже есть сюжет — {{ r.used|length }}</summary>
+  {% if r.used %}<details><summary>Не показаны: уже были в эфире или взяты другой темой — {{ r.used|length }}</summary>
     <ul class="items">{% for it in r.used %}{{ item(it) }}{% endfor %}</ul></details>{% endif %}
 </section>
 {% else %}
@@ -74,7 +76,8 @@
     });
     document.querySelectorAll(".ev").forEach(ev => { ev.hidden = !!s && !ev.querySelector(".it.hit"); });
     document.querySelectorAll(".desk").forEach(sec => { sec.hidden = !!s && !sec.querySelector(".it.hit"); });
-    found.textContent = s ? (n ? `Найдено: ${n}` : "Ничего не нашлось — модель такую новость не видела") : "";
+    found.textContent = !s ? "" : n ? `Найдено: ${n}`
+      : "Не нашлось ни среди показанных модели, ни среди отсечённых: в наших лентах за этот день такой новости не было.";
   });
 </script>
 {% endblock %}

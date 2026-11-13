@@ -59,7 +59,10 @@ class Settings(BaseSettings):
     allowed_telegram_ids: str = ""  # через запятую; пусто — пускать всех (только без https, для разработки)
     admin_telegram_ids: str = ""  # кому открыта /admin (через запятую)
 
-    edition_time: str = "05:30"  # когда собирать сюжеты дня (по timezone)
+    # когда собирать сюжеты дня (по timezone): HH:MM или auto — за edition_lead_minutes до самой ранней доставки,
+    # чтобы в выпуск попало то, что случилось ночью и рано утром
+    edition_time: str = "auto"
+    edition_lead_minutes: int = 60
     default_delivery_time: str = "07:30"
     default_minutes: int = 10
     fetch_every_minutes: int = 120

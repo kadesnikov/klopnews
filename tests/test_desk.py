@@ -37,8 +37,8 @@ def test_desk_records_what_model_saw_and_picked(monkeypatch):
     client.get(f"/login?t={sign(1, 60, s.session_secret)}")
     page = client.get("/admin/desk?date=2026-11-13")
     assert page.status_code == 200
-    assert "ИИ и технологии" in page.text and "модель видела 60" in page.text
-    assert "5 не влезли в окно" in page.text and "Microsoft Outlook is down" in page.text
+    assert "ИИ и технологии" in page.text and "модель видела 60 новостей" in page.text
+    assert "5 не влезли в окно" in page.text and "выбрала 4 события" in page.text and "Microsoft Outlook is down" in page.text
     assert "Видела, но не выбрала" in page.text
     empty = client.get("/admin/desk?date=2020-01-01")
     assert empty.status_code == 200 and "журнала нет" in empty.text

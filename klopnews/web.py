@@ -37,6 +37,7 @@ app.mount("/media/episodes", StaticFiles(directory=settings().media_dir / "episo
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["mmss"] = lambda t: f"{int(t) // 60}:{int(t) % 60:02d}"
 templates.env.globals["date_label"] = date_label
+templates.env.globals["plural"] = lambda n, one, few, many: f"{n} {plural(n, one, few, many)}"
 templates.env.filters["stories"] = lambda n: f"{n} {plural(n, 'сюжет', 'сюжета', 'сюжетов')}"
 DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MINUTES = [5, 7, 10, 15, 20]

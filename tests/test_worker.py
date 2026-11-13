@@ -31,7 +31,7 @@ def test_alert_survives_telegram_failure(sent, monkeypatch):
 
 def test_failed_edition_alerts_admin_once(sent, monkeypatch):
     s = settings()
-    monkeypatch.setattr(worker, "local_now", lambda s: worker.datetime(2026, 11, 13, 6, 0))
+    monkeypatch.setattr(worker, "local_now", lambda s: worker.datetime(2026, 11, 13, 7, 0))
     monkeypatch.setattr(worker.feeds, "fetch_all", lambda src: 0)
     monkeypatch.setattr(worker, "ensure_edition", lambda db, s: (_ for _ in ()).throw(RuntimeError("LLM 529")))
     for _ in range(3):  # три минуты подряд сборка падает
@@ -85,3 +85,31 @@ def test_failed_delivery_is_retried_later(sent, monkeypatch):
         worker.tick(s, clock[0])
     assert [round((t - 1000) / 60) for t in attempts] == [0, 10, 30]  # сразу, через 10 и ещё через 20 мин
     assert len(sent) == 2  # один алерт админам (их двое), без спама на каждой попытке
+
+
+def test_auto_edition_starts_an_hour_before_first_delivery(monkeypatch):
+    from klopnews.db import User, session
+    s = settings()
+    assert s.edition_time == "auto"
+    with session() as db:
+        assert worker.edition_start(db, s) == "06:30"  # никого нет — от доставки по умолчанию 07:30
+        db.add_all([User(tg_id=7, name="Маша", delivery_time="08:15"), User(tg_id=8, name="Папа", delivery_time="06:45")])
+        db.commit()
+        assert worker.edition_start(db, s) == "05:45"
+    monkeypatch.setenv("EDITION_TIME", "05:30")
+    settings.cache_clear()
+    with session() as db:
+        assert worker.edition_start(db, settings()) == "05:30"  # явное время из .env по-прежнему главное
+
+
+def test_feeds_are_fresh_right_before_edition(monkeypatch):
+    s = settings()
+    fetched = []
+    monkeypatch.setattr(worker.feeds, "fetch_all", lambda src: fetched.append(1))
+    monkeypatch.setattr(worker, "ensure_edition", lambda db, s: "2026-11-13")
+    monkeypatch.setattr(worker, "local_now", lambda s: worker.datetime(2026, 11, 13, 6, 31))
+    worker.tick(s, time.time() - 15 * 60)  # плановый сбор был 15 минут назад
+    assert fetched == [1]  # сюжеты дня ещё не собраны — ленты обновляются перед сборкой
+    monkeypatch.setattr(worker, "local_now", lambda s: worker.datetime(2026, 11, 13, 6, 0))
+    worker.tick(s, time.time() - 15 * 60)
+    assert fetched == [1]  # до сборки — обычный ритм раз в два часа

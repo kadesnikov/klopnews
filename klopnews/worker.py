@@ -93,14 +93,31 @@ def make_now(user_id: int) -> None:
             bot.send(s, db.get(User, user_id).tg_id, "Что-то сломалось при сборке выпуска 😿 Уже чиню.")
 
 
+FRESH_MINUTES = 10  # сюжеты дня собираются по лентам не старше этого
+
+
+def edition_start(db, s: Settings) -> str:
+    """Когда начинать сборку дня: из настроек или за edition_lead_minutes до самой ранней доставки."""
+    if s.edition_time != "auto":
+        return s.edition_time
+    first = min(db.scalars(select(User.delivery_time)), default=s.default_delivery_time)
+    h, m = map(int, first.split(":"))
+    start = max(0, h * 60 + m - s.edition_lead_minutes)
+    return f"{start // 60:02d}:{start % 60:02d}"
+
+
 def tick(s: Settings, last_fetch: float) -> float:
     now = local_now(s)
     hhmm, ed = now.strftime("%H:%M"), now.date().isoformat()
     with LOCK, session() as db:
-        if time.time() - last_fetch >= s.fetch_every_minutes * 60:
+        start, row = edition_start(db, s), db.get(Edition, ed)
+        building = hhmm >= start and (row is None or row.status != "ready")
+        # перед сборкой дня ленты — свежие: ночные новости иначе ждали бы планового сбора до двух часов
+        every = FRESH_MINUTES * 60 if building else s.fetch_every_minutes * 60
+        if time.time() - last_fetch >= every:
             feeds.fetch_all(catalog()["sources"])
             last_fetch = time.time()
-        if hhmm < s.edition_time:
+        if hhmm < start:
             return last_fetch
         ensure_edition(db, s)
         done = set(db.scalars(select(Episode.user_id).where(Episode.edition == ed)))
