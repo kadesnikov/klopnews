@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from klopnews import bot, cleanup, feeds, producer
+from klopnews import bot, cleanup, feeds, llm, producer
 from klopnews.config import Settings, catalog, settings, setup_logging
 from klopnews.db import Edition, Episode, User, session
 
@@ -68,7 +68,10 @@ def ensure_edition(db, s: Settings) -> str:
 
 
 def deliver(db, s: Settings, user: User, ed: str) -> None:
+    llm.problem = None
     ep = producer.assemble(db, s, user, ed)
+    if ep is None and llm.problem:  # пусто не потому, что новостей нет, а потому что модели нечем платить
+        raise llm.LLMBillingError(llm.problem)
     if ep is None:
         bot.send(s, user.tg_id, "Сегодня под твои настройки ничего не нашлось 🤷 Попробуй добавить темы или источники.")
         return
@@ -86,6 +89,7 @@ def make_now(user_id: int) -> None:
         except Exception as e:
             db.rollback()
             log.exception("make_now_failed: %r", e)
+            alert(s, f"now:{edition_date(s)}:{e!r}"[:200], f"/now не собрал выпуск: {e!r}")
             bot.send(s, db.get(User, user_id).tg_id, "Что-то сломалось при сборке выпуска 😿 Уже чиню.")
 
 

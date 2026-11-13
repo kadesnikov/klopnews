@@ -11,9 +11,10 @@ from pathlib import Path
 from sqlalchemy import select
 
 from klopnews import editor, events, holidays, weather
+from klopnews import llm as llmlib
 from klopnews.config import Settings, catalog, optional_topics
 from klopnews.db import Edition, Episode, Story, User
-from klopnews.llm import make_llm
+from klopnews.llm import LLMBillingError, make_llm
 from klopnews.render import studio
 from klopnews.tts import RATE, TTSError, synthesize
 
@@ -96,6 +97,7 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
     Повторный вызов (после перезапуска воркера) не переписывает готовое: дописывает новые события и рендерит недостающее.
     write=False — только озвучить и отрендерить то, что не готово (rerender).
     """
+    llmlib.problem = None
     ed = db.get(Edition, edition) or Edition(date=edition)
     ed.status = "building"
     db.add(ed)
@@ -114,6 +116,10 @@ def build_edition(db, s: Settings, edition: str, now: datetime, write: bool = Tr
         if "weather" in cat["topics"] and cat.get("weather") and not any(st.kind == "weather" for st in have):
             forecast(db, s, cat, edition)
     prepare(db, s, db.scalars(select(User)).all(), edition)
+    if llmlib.problem:  # ошибки модели глотаются по темам — без денег вышел бы пустой выпуск, а он «готов»
+        ed.status = "failed"  # failed: воркер соберёт заново, когда деньги появятся, дописав недостающее
+        db.commit()
+        raise LLMBillingError(llmlib.problem)
     ed.status = "ready"
     db.commit()
     log.info("выпуск дня %s готов", edition)
@@ -135,6 +141,8 @@ def prepare(db, s: Settings, users: list[User], edition: str) -> list[Story]:
             try:
                 editor.write_draft(db, llm, st, cat["sources"])
                 log.info("сюжет написан: [%s] %s", st.topic, st.headline)
+            except LLMBillingError as e:
+                log.error("write_postponed %s: %s", st.headline, e)  # остаётся черновиком до пополнения счёта
             except Exception as e:
                 log.error("write_failed %s: %r", st.headline, e)
                 st.status = "failed"
