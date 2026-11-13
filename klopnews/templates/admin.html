@@ -3,6 +3,7 @@
 {% block main %}
 {% set t = s.tiles %}
 <h1>Админка</h1>
+<p class="muted"><a href="/admin/desk">Журнал редакции →</a> что модель видела и выбрала по каждой теме</p>
 <p class="muted">За {{ s.days }} дн. ·
   {% for d in [7, 14, 30] %}<a href="?days={{ d }}"{% if d == s.days %} class="on"{% endif %}>{{ d }} дн.</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
 
@@ -79,7 +80,7 @@
   <div class="scroll"><table>
     <tr><th>Сюжеты дня</th><th>Статус</th><th>Не собрались</th></tr>
     {% for e in s.editions %}
-    <tr><td class="num">{{ e.ed.date[8:] }}.{{ e.ed.date[5:7] }}</td>
+    <tr><td class="num"><a href="/admin/desk?date={{ e.ed.date }}">{{ e.ed.date[8:] }}.{{ e.ed.date[5:7] }}</a></td>
       <td>{% if e.ed.status == "ready" %}<span class="ok">✓ готово</span>{% elif e.ed.status == "failed" %}<span class="warn">✕ ошибка</span>{% else %}<span class="muted">собирается…</span>{% endif %}</td>
       <td class="num">{% if e.failed %}<span class="warn">{{ e.failed }}</span>{% else %}0{% endif %}</td></tr>
     {% endfor %}

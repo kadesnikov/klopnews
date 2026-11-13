@@ -37,6 +37,7 @@ app.mount("/media/episodes", StaticFiles(directory=settings().media_dir / "episo
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["mmss"] = lambda t: f"{int(t) // 60}:{int(t) % 60:02d}"
 templates.env.globals["date_label"] = date_label
+templates.env.globals["plural"] = lambda n, one, few, many: f"{n} {plural(n, one, few, many)}"
 templates.env.filters["stories"] = lambda n: f"{n} {plural(n, 'сюжет', 'сюжета', 'сюжетов')}"
 DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 MINUTES = [5, 7, 10, 15, 20]
@@ -58,6 +59,8 @@ def week_label(user: User) -> str:
 
 
 templates.env.globals.update(days=DAYS, minute_choices=MINUTES, week_label=week_label)
+templates.env.filters["local"] = lambda v: (datetime.fromisoformat(v) if isinstance(v, str) else v).replace(
+    tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings().timezone)).strftime("%d.%m %H:%M")
 templates.env.filters["pct"] = lambda x: "—" if x is None else f"{round(x * 100)}%"
 
 
@@ -155,6 +158,18 @@ def admin(request: Request, days: int = 14):
             raise HTTPException(404)
         days = max(1, min(90, days))
         return page(request, "admin.html", user=user, s=stats.overview(db, utcnow(), catalog(), days))
+
+
+@app.get("/admin/desk", response_class=HTMLResponse)
+def admin_desk(request: Request, date: str = ""):
+    """Журнал редакции: видела ли модель новость, выбрала ли и почему она не дошла до выпуска."""
+    with session() as db:
+        user = current_user(request, db)
+        if not is_admin(user):
+            raise HTTPException(404)
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            date = datetime.now(ZoneInfo(settings().timezone)).date().isoformat()
+        return page(request, "desk.html", user=user, d=stats.desk(db, date, catalog()), tz=ZoneInfo(settings().timezone))
 
 
 @app.get("/login")

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Клоп·Новости — редакция{% endblock %}
+{% macro item(it, extra="") %}
+<li class="it" data-text="{{ (it.title ~ ' ' ~ it.source)|lower }}">
+  <span class="muted num">{{ it.at|local }}</span>
+  <span><a href="{{ it.url }}" target="_blank" rel="noopener">{{ it.title }}</a> <span class="muted small">{{ it.source }}{{ extra }}</span></span>
+</li>
+{% endmacro %}
+{% block main %}
+<h1>Редакция</h1>
+<p class="muted">Что модель видела по каждой теме, что выбрала и куда это делось дальше. <a href="/admin">← Админка</a></p>
+
+<div class="desk-bar">
+  <nav class="desk-days" aria-label="День">
+    {% for day in d.days %}<a href="?date={{ day }}"{% if day == d.edition %} class="on" aria-current="page"{% endif %}>{{ day[8:] }}.{{ day[5:7] }}</a>{% endfor %}
+  </nav>
+  <label class="desk-search"><span class="sr">Поиск по заголовкам</span>
+    <input type="search" id="q" placeholder="Поиск: Microsoft, Outlook, сбой…" autocomplete="off"></label>
+  <p class="muted small" id="found" aria-live="polite"></p>
+</div>
+
+{% for r in d.runs %}
+{% set sel = r.sel %}
+<section class="card block desk">
+  <h2><span class="dot" style="background: {{ r.color }}"></span>{{ r.title }}</h2>
+  <p class="muted small">Сборка {{ sel.created_at|local }}{% if sel.shown %} · модель видела {{ plural(sel.shown|length, "новость", "новости", "новостей") }}
+    · выбрала {{ plural(r.events|length, "событие", "события", "событий") }}
+    {%- if r.limit %} · <span class="warn">{{ plural(r.limit|length, "не влезла", "не влезли", "не влезли") }} в окно</span>{% endif %}
+    {%- if r.used %} · {{ r.used|length }} уже в сюжетах{% endif %}{% endif %}</p>
+  {% if sel.error %}<p class="warn small">Сбой при выборе: {{ sel.error }}</p>
+  {% elif not sel.shown %}<p class="muted small">Свежих новостей по теме за сутки не было — модель не спрашивали.</p>{% endif %}
+
+  {% if r.events %}
+  <ol class="events">
+    {% for ev in r.events %}
+    <li class="ev">
+      <span class="imp" title="Важность по оценке модели">{{ ev.importance }}</span>
+      <div>
+        <b>{{ ev.story.headline if ev.story else ev["items"][0].title }}</b>
+        <p class="small {{ 'ok' if ev.aired else 'muted' }}">
+          {% if ev.aired %}в выпуске: {{ ev.aired|join(', ') }}{% else %}{{ ev.state }}{% if ev.story and ev.story.status == 'ready' %}, но ни в чей выпуск не влез{% endif %}{% endif %}
+          {%- if ev.reporter_ok %} · можно с включением{% endif %}</p>
+        <ul class="items">{% for it in ev["items"] %}{{ item(it) }}{% endfor %}</ul>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+
+  {% if r.rest %}<details><summary>Видела, но не выбрала — {{ r.rest|length }}</summary>
+    <ul class="items">{% for it in r.rest %}{{ item(it) }}{% endfor %}</ul></details>{% endif %}
+  {% if r.limit %}<details><summary>Не видела: не влезли в окно из 60 самых свежих — {{ r.limit|length }}</summary>
+    <ul class="items">{% for it in r.limit %}{{ item(it) }}{% endfor %}</ul></details>{% endif %}
+  {% if r.used %}<details><summary>Не показаны: уже были в эфире или взяты другой темой — {{ r.used|length }}</summary>
+    <ul class="items">{% for it in r.used %}{{ item(it) }}{% endfor %}</ul></details>{% endif %}
+</section>
+{% else %}
+<p class="card">За {{ d.edition[8:] }}.{{ d.edition[5:7] }} журнала нет: сюжеты дня ещё не собирались или собирались до появления журнала.</p>
+{% endfor %}
+
+<script>
+  const q = document.getElementById("q"), found = document.getElementById("found");
+  q.addEventListener("input", () => {
+    const s = q.value.trim().toLowerCase();
+    let n = 0;
+    document.querySelectorAll(".it").forEach(li => {
+      const hit = s && li.dataset.text.includes(s);
+      li.classList.toggle("hit", !!hit);
+      li.hidden = !!s && !hit;
+      n += hit ? 1 : 0;
+    });
+    document.querySelectorAll(".desk details").forEach(det => {
+      const hit = !!det.querySelector(".it.hit");
+      det.open = !!s && hit;
+      det.hidden = !!s && !hit;
+    });
+    document.querySelectorAll(".ev").forEach(ev => { ev.hidden = !!s && !ev.querySelector(".it.hit"); });
+    document.querySelectorAll(".desk").forEach(sec => { sec.hidden = !!s && !sec.querySelector(".it.hit"); });
+    found.textContent = !s ? "" : n ? `Найдено: ${n}`
+      : "Не нашлось ни среди показанных модели, ни среди отсечённых: в наших лентах за этот день такой новости не было.";
+  });
+</script>
+{% endblock %}

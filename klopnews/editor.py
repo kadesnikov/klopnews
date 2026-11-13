@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from klopnews import events, feeds, markets, weather
-from klopnews.db import Event, Item, Story, User
+from klopnews.db import Event, Item, Selection, Story, User
 from klopnews.llm import ask_json
 
 log = logging.getLogger(__name__)
@@ -39,7 +39,9 @@ SELECT = PERSONA + """
 Ты выпускающий редактор. Из новостей за сутки по теме «{topic}» выбери до {n} самых важных и интересных событий.
 Одна история из разных источников — одно событие: перечисли все её номера.
 Пропускай рекламу, мелочи, гороскопы, спорт без большого повода и то, что уже было в эфире, если нет нового развития.
-importance — 1..10, насколько событие важно и интересно. reporter_ok — true, если у события есть конкретное место
+importance — 1..10, насколько событие важно и интересно. Сколько источников пишут об одном — сильный сигнал важности:
+о чём пишут трое, то обычно важнее эксклюзива. Массовые сбои и аварии сервисов, которыми пользуется семья
+(почта, мессенджеры, банки, связь, облака Microsoft, Google, Apple), — важны, даже если заголовок короткий. reporter_ok — true, если у события есть конкретное место
 (город, площадка, космодром), куда можно «отправить корреспондента», и это не трагедия.
 Ответ — только JSON: {{"events": [{{"items": [3, 7], "importance": 8, "reporter_ok": false}}]}}"""
 
@@ -116,11 +118,35 @@ def write_weather(llm, w: dict, city: str, edition: str) -> Story:
                  data={"weather": w, "city": city})
 
 
-def recent_items(db, sources: dict, topic: str, since: datetime, limit: int = 60) -> list[Item]:
+def recent_items(db, sources: dict, topic: str, since: datetime, limit: int = 60, offset: int = 0) -> list[Item]:
     ids = [sid for sid, s in sources.items() if topic in s["topics"]]
     q = (select(Item).where(Item.source_id.in_(ids), Item.published_at >= since)
-         .order_by(Item.published_at.desc()).limit(limit))
+         .order_by(Item.published_at.desc()).offset(offset).limit(limit))
     return list(db.scalars(q))
+
+
+def brief(it: Item, sources: dict) -> dict:
+    return {"source": sources.get(it.source_id, {}).get("name", it.source_id), "title": it.title, "url": it.url,
+            "at": it.published_at.isoformat(timespec="minutes")}
+
+
+def log_selection(db, edition: str, topic: str, shown: list[Item], events: list[dict], sources: dict, since: datetime,
+                  aired: list[Item] = (), error: str | None = None) -> None:
+    """Запомнить решение редактора. Сам журнал не должен мешать выпуску.
+
+    cut — что модель не видела: why=used — по новости уже есть сюжет (вчера или в другой теме),
+    why=limit — не влезла в окно из 60 самых свежих."""
+    try:
+        index = {it.url: i for i, it in enumerate(shown)}
+        late = recent_items(db, sources, topic, since, limit=200, offset=60)
+        cut = [brief(it, sources) | {"why": "used"} for it in aired] + [brief(it, sources) | {"why": "limit"} for it in late]
+        db.add(Selection(edition=edition, topic=topic, error=error, shown=[brief(it, sources) for it in shown], cut=cut,
+                         picked=[{"items": [index[it.url] for it in ev["items"] if it.url in index],
+                                  "importance": ev["importance"], "reporter_ok": ev["reporter_ok"]} for ev in events]))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log.warning("selection_log_failed %s: %r", topic, e)
 
 
 def blocked_by_filter(e: Exception) -> bool:
@@ -133,7 +159,7 @@ def select_events(llm, topic_title: str, items: list[Item], sources: dict, cover
     lines = [f"[{i}] ({sources[it.source_id]['name']}) {it.title} — {it.summary[:200]}" for i, it in enumerate(items)]
     user = ("Уже были в эфире (не повторять, если нет нового развития): " + ("; ".join(covered) or "—")
             + "\n\nУже взяты в сегодняшний выпуск в других темах (эти события не выбирай совсем, даже из других "
-            "источников): " + ("; ".join(taken) or "—")
+            "источников; но другое событие той же компании или страны — это другое событие): " + ("; ".join(taken) or "—")
             + "\n\nНовости:\n" + "\n".join(lines))
     try:
         events = ask_json(llm, SELECT.format(topic=topic_title, n=n), user).get("events", [])
@@ -262,20 +288,26 @@ def build_stories(db, llm, cat: dict, edition: str, now: datetime, reporter_enab
             continue  # у темы нет лент (погода) — её сюжет пишется отдельно
         if meta.get("optional") and topic not in wanted:  # тему по желанию никто не включил — не тратим на неё модель
             continue
-        items = [it for it in recent_items(db, sources, topic, since) if it.url not in used]
+        window = recent_items(db, sources, topic, since)
+        items = [it for it in window if it.url not in used]
+        aired = [it for it in window if it.url in used]
         if not items:
             log.warning("no items for topic %s", topic)
+            log_selection(db, edition, topic, [], [], sources, since, aired)
             continue
         # вчерашние и уже написанные сегодня (если сборка дописывает день): иначе одно событие придёт дважды
         covered = list(db.scalars(select(Story.headline).where(Story.edition.in_([yday, edition]), Story.topic == topic)))
         try:
             events = select_events(llm, meta["title"], items, sources, covered, per_topic, taken)
-            picked += [(topic, ev) for ev in events]
-            used |= {it.url for ev in events for it in ev["items"]}
-            taken += [ev["items"][0].title for ev in events]
-            log.info("тема %s: %d новостей → %d событий", topic, len(items), len(events))
         except Exception as e:
             log.error("select_failed %s: %r", topic, e)
+            log_selection(db, edition, topic, items, [], sources, since, aired, error=repr(e)[:500])
+            continue
+        log_selection(db, edition, topic, items, events, sources, since, aired)
+        picked += [(topic, ev) for ev in events]
+        used |= {it.url for ev in events for it in ev["items"]}
+        taken += [ev["items"][0].title for ev in events]
+        log.info("тема %s: %d новостей → %d событий", topic, len(items), len(events))
 
     # Прямые включения — самым важным событиям, у которых есть место
     report_ids = set()
