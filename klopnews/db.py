@@ -89,6 +89,19 @@ class Episode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Selection(Base):
+    """Журнал редакции: что модель видела по теме, что выбрала и что не влезло в окно (страница /admin/desk)."""
+    __tablename__ = "selections"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    edition: Mapped[str] = mapped_column(String(10), index=True)
+    topic: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    shown: Mapped[list] = mapped_column(JSON, default=list)  # [{source, title, url, at}] — ровно то, что ушло модели
+    picked: Mapped[list] = mapped_column(JSON, default=list)  # [{items: [индексы в shown], importance, reporter_ok}]
+    cut: Mapped[list] = mapped_column(JSON, default=list)  # свежие за окно, но не влезли в лимит — модель их не видела
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class Event(Base):
     """ИИ-ивент в Праге из афиш и поиска (klopnews/events.py)."""
     __tablename__ = "events"
